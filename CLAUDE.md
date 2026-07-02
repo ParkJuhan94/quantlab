@@ -372,11 +372,10 @@ com.quantlab/{feature}/
 
 ## 10. 주의사항 / 금지사항
 
-- KIS API 실전 환경 절대 사용 금지 (개발 중 모의투자만)
 - `.env` 파일 Git 커밋 금지
 - Python 엔진 장애 시 Spring에서 fallback 처리 필수 (이전 캐시 스코어 반환)
 - OHLCV 수집 배치는 장 마감(15:30) 이후에만 실행
-- 토스증권 API Rate Limit — 배치 시 60ms 딜레이 유지 (Rate Limit 응답 헤더 모니터링 권장)
+- 토스증권 API Rate Limit은 **초당 토큰 버킷** 방식 (일일 쿼터 없음, `X-RateLimit-Limit`은 초당 burst capacity, 매초 토큰 리필). `MARKET_DATA_CHART` 그룹 초당 한도(스펙 예시 10건) 기준 150ms 딜레이 유지. 429 시 `RATE_LIMIT_EXCEEDED`로 감지해 수 초 백오프 후 재시도(`X-RateLimit-Reset`/`Retry-After` 헤더 참고)
 
 ---
 
