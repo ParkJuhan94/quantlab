@@ -180,6 +180,10 @@ spring:
 
 ## 7. 기술적 지표 스코어링 로직
 
+> **v2 설계 진행 중.** 추세추종/평균회귀 서브스코어 분리 + AI 코멘트 생성 방식으로
+> 고도화 중이며, 상세 공식/임계값은 `quant-engine/docs/SCORING_DESIGN.md`
+> (gitignore 처리, 로컬 전용) 참고. 아래는 최초 v1 설계.
+
 ### 계산 지표 (v1)
 | 지표 | 파라미터 | 점수 산출 기준 |
 |---|---|---|
@@ -218,10 +222,10 @@ spring:
 - [x] 관심 종목 CRUD (사용자별 스코핑)
 - [x] 현재가 / 차트 API
 
-### ⬜ Phase 3 — Python 퀀트 엔진
-- [ ] FastAPI 프로젝트 세팅
-- [ ] 지표 계산 (RSI, MACD, 볼린저밴드, 거래량, 이평)
-- [ ] 스코어링 + Spring 연동
+### 🔶 Phase 3 — Python 퀀트 엔진 (일부 완료)
+- [x] FastAPI 프로젝트 세팅
+- [x] 지표 계산 (RSI, MACD, 볼린저밴드, 거래량, 이평) + 스코어링(v2, 추세추종/평균회귀 분리)
+- [ ] Spring 연동 (Spring -> POST /calculate/score/batch 호출, 점수 영속화, 조회 API)
 
 ### ⬜ Phase 4 — WebSocket 실시간
 - [ ] STOMP 세팅
