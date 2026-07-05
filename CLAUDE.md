@@ -212,10 +212,11 @@ spring:
 - [x] 종목 마스터 적재 (KRX CSV + ApplicationRunner 자동 적재)
 - [x] 일별 OHLCV 수집 Scheduler (매일 16:00 MON-FRI)
 
-### ⬜ Phase 2 — 도메인 API
-- [ ] 종목 검색 API
-- [ ] 관심 종목 CRUD
-- [ ] 현재가 / 차트 API
+### ✅ Phase 2 — 도메인 API (완료)
+- [x] 소셜 로그인(구글/카카오/네이버) + JWT 인증 (Access/Refresh, Redis 저장)
+- [x] 종목 검색 API
+- [x] 관심 종목 CRUD (사용자별 스코핑)
+- [x] 현재가 / 차트 API
 
 ### ⬜ Phase 3 — Python 퀀트 엔진
 - [ ] FastAPI 프로젝트 세팅
