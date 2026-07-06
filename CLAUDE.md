@@ -222,10 +222,12 @@ spring:
 - [x] 관심 종목 CRUD (사용자별 스코핑)
 - [x] 현재가 / 차트 API
 
-### 🔶 Phase 3 — Python 퀀트 엔진 (일부 완료)
+### ✅ Phase 3 — Python 퀀트 엔진 (완료)
 - [x] FastAPI 프로젝트 세팅
 - [x] 지표 계산 (RSI, MACD, 볼린저밴드, 거래량, 이평) + 스코어링(v2, 추세추종/평균회귀 분리)
-- [ ] Spring 연동 (Spring -> POST /calculate/score/batch 호출, 점수 영속화, 조회 API)
+- [x] Spring 연동 (Spring -> POST /calculate/score/batch 호출, 점수 영속화, 조회 API)
+  - 관심 종목 등록 즉시 + 매일 16:00 배치로 재계산, `score` 테이블에 일별 이력 누적
+  - Python 엔진 장애 시 직전 스코어 이력을 그대로 반환(별도 캐시 계층 없이 fallback)
 
 ### ⬜ Phase 4 — WebSocket 실시간
 - [ ] STOMP 세팅
