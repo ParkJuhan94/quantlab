@@ -41,7 +41,7 @@ quantlab/
 │   │       ├── common/              # TimeBaseEntity, Config, Exception
 │   │       ├── stock/               # 종목 도메인, 서비스, CSV 적재
 │   │       ├── price/               # 시세 도메인, 수집 서비스, 스케줄러
-│   │       └── infra/kis/           # KIS API 클라이언트, 토큰 관리
+│   │       └── infra/toss/          # 토스증권 API 클라이언트, 토큰 관리
 │   ├── common/                 # 공유 유틸 (java-library, Spring 미포함)
 │   │   └── src/main/java/com/quantlab/common/exception/ErrorCode.java
 │   └── event/                  # Kafka 이벤트 (향후 확장)
@@ -167,9 +167,15 @@ spring:
 | GET | `/api/dashboard/scores` | 관심 종목 전체 스코어 랭킹 |
 
 ### WebSocket
-- 엔드포인트: `ws://localhost:8080/ws/stocks`
+- 엔드포인트: `ws://localhost:8080/ws/stocks` (SockJS)
 - 구독 토픽: `/topic/price/{stockCode}`
-- 메시지: `{ code, currentPrice, changeRate, volume, timestamp }`
+- 메시지: `{ stockCode, currentPrice, changeRate, timestamp }`
+  - `volume`(거래량)은 제외 - 폴링 소스인 Toss 현재가 API가 거래량을
+    주지 않고, 이를 얻으려면 더 빡빡한 레이트리밋 그룹(`MARKET_DATA_CHART`)의
+    캔들 API를 매 틱마다 추가 호출해야 해 실익 대비 비용이 큼(v1 스코프 제외)
+- 토스증권 API가 아직 WebSocket을 지원하지 않아(§4) Spring이 REST
+  현재가를 폴링(기본 3초, `REALTIME_PRICE_POLL_INTERVAL_MS`로 조정)해
+  STOMP로 브로드캐스트하는 변환 계층으로 구현(`PriceBroadcastScheduler`)
 
 ### Python 퀀트 엔진
 | Method | URI | 설명 |
@@ -229,10 +235,17 @@ spring:
   - 관심 종목 등록 즉시 + 매일 16:00 배치로 재계산, `score` 테이블에 일별 이력 누적
   - Python 엔진 장애 시 직전 스코어 이력을 그대로 반환(별도 캐시 계층 없이 fallback)
 
-### ⬜ Phase 4 — WebSocket 실시간
-- [ ] STOMP 세팅
-- [ ] KIS WebSocket 구독 → 브로드캐스트
-- [ ] Redis 시세 캐싱
+### ✅ Phase 4 — WebSocket 실시간 (완료)
+- [x] STOMP 세팅 (`/ws/stocks`, SockJS, `/topic` 심플 브로커)
+- [x] Toss 현재가 폴링 → STOMP 브로드캐스트
+  - 토스증권 API가 WebSocket 미지원이라(§4) REST 폴링(기본 3초) →
+    `/topic/price/{stockCode}` 브로드캐스트로 구현. 장중 판별은
+    Toss 장 운영 캘린더 API로 공휴일까지 인지
+  - 정상 상태에서는 폴링 틱마다 MySQL 쿼리가 발생하지 않도록
+    관심종목 코드/전일종가/장운영여부를 각각 인메모리 캐싱
+    (`WatchlistedStockCodeCache`/`PreviousCloseCache`/`MarketCalendarCache`)
+- [x] Redis 시세 캐싱 (`PriceCacheStore`) - 브로드캐스트 스냅샷을
+  적재하고, 기존 현재가 조회 API도 이를 먼저 조회하는 read-through로 재사용
 
 ### ⬜ Phase 5 — 프론트엔드
 - [ ] React 초기 세팅
