@@ -53,13 +53,21 @@ quantlab/
 │       ├── indicators.py       # RSI, MACD, 볼린저밴드 등
 │       └── scorer.py           # 스코어링 & 등급 산출
 │
-└── frontend/                   # React + TypeScript
+└── frontend/                   # React 19 + TypeScript + Vite + Tailwind CSS
     └── src/
-        ├── pages/
-        ├── components/
+        ├── main.tsx             # QueryClientProvider + BrowserRouter + AuthProvider
+        ├── App.tsx              # 라우트 + 레이아웃
+        ├── pages/                # Login, OAuthCallback, Watchlist, StockDetail, Dashboard
+        ├── components/           # layout/, common/, watchlist/, search/, chart/, score/
         ├── hooks/
-        │   └── useWebSocket.ts
-        └── api/
+        │   ├── useStockPriceSocket.ts  # STOMP 다건 구독
+        │   └── queries/          # React Query 훅(도메인별)
+        ├── realtime/
+        │   └── stompClient.ts    # STOMP 클라이언트 싱글턴(참조 카운팅 구독)
+        ├── auth/                 # AuthContext, tokenStorage, ProtectedRoute
+        ├── api/                  # axios 클라이언트 + 엔드포인트별 래퍼
+        ├── types/                # 백엔드 DTO 미러링
+        └── config/               # env.ts, oauth.ts(authorize URL 빌더)
 ```
 
 ---
@@ -91,11 +99,15 @@ quantlab/
 ### Frontend (React)
 | 항목 | 선택 |
 |---|---|
-| Framework | React 18 + TypeScript |
-| 차트 | TradingView Lightweight Charts |
-| WebSocket | SockJS + StompJS |
-| 상태 관리 | React Query (서버 상태) + useState (로컬) |
-| 스타일 | Tailwind CSS |
+| Framework | React 19 + TypeScript (Vite) |
+| 빌드 도구 | Vite (`@tailwindcss/vite` 플러그인 방식, v3의 tailwind.config.js 불필요) |
+| 라우팅 | react-router-dom |
+| 차트 | TradingView Lightweight Charts (v5, `addSeries(CandlestickSeries, ...)` API) |
+| WebSocket | SockJS + StompJS (`@stomp/stompjs`, `sockjs-client`) |
+| HTTP 클라이언트 | axios (요청 인터셉터로 Bearer 부착, 응답 인터셉터로 401 재발급) |
+| 상태 관리 | React Query (서버 상태) + Context(인증) + useState (로컬) |
+| 스타일 | Tailwind CSS v4 |
+| 개발 서버 포트 | **3001 고정**(`vite.config.ts` `strictPort`) - OAuth 리다이렉트 URI가 이 포트를 전제로 함(로컬에 Grafana가 3000번을 점유해 3001로 결정) |
 
 ---
 
@@ -285,11 +297,30 @@ spring:
 - [x] Redis 시세 캐싱 (`PriceCacheStore`) - 브로드캐스트 스냅샷을
   적재하고, 기존 현재가 조회 API도 이를 먼저 조회하는 read-through로 재사용
 
-### ⬜ Phase 5 — 프론트엔드
-- [ ] React 초기 세팅
-- [ ] 관심 종목 리스트 + 실시간 시세
-- [ ] 종목 상세 차트
-- [ ] 스코어 대시보드
+### ✅ Phase 5 — 프론트엔드 (완료)
+- [x] React 초기 세팅 (Vite + React 19 + TS + Tailwind CSS v4, 포트 3001 고정)
+  - 인증은 프론트엔드가 OAuth authorize URL을 직접 만들어 브라우저를
+    리다이렉트하는 구조(백엔드엔 authorize 엔드포인트가 없음) - code만
+    `POST /api/auth/login/{provider}`로 넘기면 백엔드가 서버사이드로
+    토큰 교환. CSRF 방지 state는 sessionStorage에 보관 후 콜백에서 대조
+  - `/dev/auth/token`(개발 프로필 전용)으로 실제 OAuth 앱 콘솔 등록 없이
+    인증 필요 화면 전체를 검증 가능
+  - 백엔드에 CORS 설정 전무했던 것을 발견해 선행 커밋으로 추가.
+    SockJS의 XHR 핸드셰이크(`/ws/stocks/info`)가 기본적으로
+    `withCredentials=true`라 `Access-Control-Allow-Credentials: true`도
+    필요(REST 인증 자체는 여전히 쿠키가 아닌 Bearer 헤더 사용, 오리진을
+    특정 값 하나로 고정해뒀으므로 안전)
+- [x] 관심 종목 리스트 + 실시간 시세 (검색으로 추가, 낙관적 삭제,
+  STOMP 클라이언트 싱글턴 + 참조 카운팅 구독으로 종목당 소켓 하나가
+  아니라 앱 전체에 소켓 하나만 유지)
+- [x] 종목 상세 차트 (Lightweight Charts v5, 기간 선택, 스코어 카드 -
+  `ScoreResponse.grade`는 enum 이름이 아니라 한글 표시명으로 내려오므로
+  주의)
+- [x] 스코어 대시보드 (관심종목 스코어 랭킹, 종합점수 내림차순)
+
+전 구간 Playwright 헤드리스 브라우저 + 실제 백엔드로 실증(로그인/로그아웃,
+관심종목 추가·삭제, 실시간 시세 구독 프레임, 차트·스코어 렌더, 대시보드
+정렬까지) - 자세한 내용은 각 기능 커밋 메시지 참고.
 
 ### ⬜ Phase 6 — 배포
 - [ ] Docker Compose
