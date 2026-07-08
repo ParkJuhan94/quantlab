@@ -500,3 +500,52 @@ mysql -h 127.0.0.1 -P 3308 -u root -pquantlab quantlab
 # Redis 접속
 docker exec -it quantlab-redis redis-cli
 ```
+
+---
+
+## 작업 기록
+
+### 2026-07-08 - 프론트엔드 검증 보강 + 다듬기 + 개발 가이드 문서화
+
+**변경 사항**
+- Phase 5(프론트엔드) 완료 후 미검증 상태였던 시나리오를 Playwright
+  헤드리스 브라우저로 실제 검증: 401→토큰 재발급→재시도, 재발급 자체
+  실패 시 로그인 리다이렉트, 빈 관심종목/빈 대시보드 상태, 검색 결과
+  없음, 백엔드 네트워크 장애 시 에러 상태, 375px 모바일 뷰포트 레이아웃
+- 검증 중 발견한 버그 4건 수정:
+  - React Query 기본 재시도(3회, 지수 백오프)로 장애 시 에러 노출까지
+    7.4초 걸리던 것을 전역 retry:1로 낮춰 1.4초로 단축
+  - 수동 ResizeObserver 방식이 모바일에서 캔들 차트를 20px 밀려나게
+    하던 문제를 lightweight-charts 공식 autoSize 옵션으로 교체
+  - 스코어를 반올림 없이 원시 double(예: 43.91018446890717)로 그대로
+    렌더링하던 게 스코어 대시보드 테이블이 모바일에서 페이지를 221px
+    밀어내던 오버플로우의 실제 원인이었음 - 소수 1자리 반올림 +
+    테이블 overflow-x-auto 방어 추가
+- 번들 다듬기: lightweight-charts를 종목 상세 페이지에서만 불러오도록
+  React.lazy 적용(메인 청크 563KB → 402KB)
+- oxlint 경고 해소: AuthContext.tsx를 컨텍스트(context.ts)/Provider
+  (AuthContext.tsx)/훅(useAuth.ts) 3개 파일로 분리
+- 신규 docs/DEVELOPMENT.md: 로컬 개발 환경 실행법 + Playwright 검증
+  방법론 정리(일반 개발 가이드라 gitignore 대상 아님)
+
+**변경 파일**
+- `frontend/src/main.tsx` — QueryClient 기본 retry 1로 조정
+- `frontend/src/components/chart/CandleChart.tsx` — autoSize 전환
+- `frontend/src/utils/scoreFormat.ts`(신규) — 스코어 반올림 헬퍼
+- `frontend/src/components/score/ScoreCard.tsx`, `ScoreRankingTable.tsx` — 반올림 적용 + overflow-x-auto
+- `frontend/src/pages/WatchlistPage.tsx` — 테이블 overflow-x-auto
+- `frontend/src/pages/StockDetailPage.tsx` — CandleChart lazy 로딩
+- `frontend/src/auth/context.ts`(신규), `AuthContext.tsx`, `useAuth.ts`(신규) — 파일 분리
+- `docs/DEVELOPMENT.md`(신규), `CLAUDE.md` §11 — 문서 링크 + Redis 포트 주석 오타 수정
+
+**결정 사항**
+- 되돌릴 수 없는 조작(관심종목 전체 삭제로 빈 상태 확인)은 원래
+  stockCode 목록을 먼저 기록해두고 검증 후 API로 원상복구 - dev
+  테스트 계정 데이터를 훼손하지 않기 위함
+- 검증 스크립트(Playwright)는 frontend/ 안에 임시로 두고 커밋하지
+  않음(모듈 해석 문제 + 일회성 도구 성격)
+
+**다음 작업**
+- 실제 OAuth 라운드트립(구글/카카오/네이버 콘솔 등록 여부)은 이
+  세션에서 검증 불가 - 사용자가 직접 확인 필요
+- CLAUDE.md Phase 6(배포)가 마지막 미완 Phase
