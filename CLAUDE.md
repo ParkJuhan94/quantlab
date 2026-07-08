@@ -322,10 +322,42 @@ spring:
 관심종목 추가·삭제, 실시간 시세 구독 프레임, 차트·스코어 렌더, 대시보드
 정렬까지) - 자세한 내용은 각 기능 커밋 메시지 참고.
 
-### ⬜ Phase 6 — 배포
-- [ ] Docker Compose
-- [ ] GitHub Actions CI/CD
-- [ ] AWS EC2 배포
+### 🟡 Phase 6 — 배포 (아티팩트 준비 완료, 실제 EC2 배포는 사용자 진행 필요)
+- [x] Docker Compose (단일 EC2 + nginx 리버스 프록시 아키텍처)
+  - 애플리케이션 3종 Dockerfile(`backend/Dockerfile`·`quant-engine/Dockerfile`·
+    `frontend/Dockerfile`) + `docker-compose.prod.yml` 신규 작성.
+    프론트는 nginx가 정적 파일을 서빙하며 `/api`·`/ws`만 backend로
+    프록시 - 프론트가 always same-origin(`VITE_API_BASE_URL=""` 빌드
+    인자)으로만 요청하게 만들어 브라우저 CORS 자체가 필요 없어지는
+    설계(`frontend/nginx.conf`)
+  - 로컬에서 `docker-compose.prod.yml`을 실제로 기동해 검증하던 중,
+    dev용 `docker-compose.yml`과 같은 디렉터리라 프로젝트명(컨테이너명·
+    볼륨명)이 겹쳐 dev MySQL/Redis 컨테이너·볼륨을 그대로 재사용(사실상
+    덮어씀)해버리는 문제를 발견 - `docker-compose.prod.yml`에
+    `name: quantlab-prod`를 명시하고 컨테이너명도 `quantlab-prod-*`로
+    분리해 해결. 로컬 dev 인프라를 실제로 손상시키기 전에 잡은 문제
+  - `/api/health` 200, SPA 렌더, 종목 마스터 CSV 자동적재(2706건)까지
+    실제 컨테이너 기동으로 확인
+- [x] GitHub Actions CI/CD
+  - `.github/workflows/ci.yml`: 백엔드(gradle build, MySQL은
+    Testcontainers, Redis는 서비스 컨테이너로 6381 매핑 - 기존 로컬
+    제약과 동일한 이유), 퀀트엔진(pytest), 프론트(lint+build) 3잡 병렬
+  - `.github/workflows/deploy.yml`: 태그 푸시/수동 실행 시 GHCR
+    이미지 빌드·푸시 → SSH로 EC2 접속해 compose pull/up
+  - 실제 GitHub Actions 실행과 EC2 배포 자체는 이 세션에서 검증
+    불가(사용자 AWS 계정·시크릿 필요) - `docs/DEPLOYMENT.md` 런북으로
+    안내
+- [ ] AWS EC2 배포 — **사용자가 직접 진행해야 하는 부분**(EC2 프로비저닝,
+  보안그룹, GitHub Secrets 등록, OAuth 콘솔 운영 도메인 등록).
+  절차는 `docs/DEPLOYMENT.md` 참고
+
+배포 검증 도중 발견한 사이드 버그 1건: `GlobalExceptionHandler`의
+catch-all(`@ExceptionHandler(Exception.class)`)이 Spring 6의
+`NoResourceFoundException`(매핑되지 않은 경로)까지 삼켜서 모든 404
+상황이 500으로 응답되고 있었음 - `/dev/auth/token`이 prod 프로파일에서
+정말 404가 되는지 실제로 검증하려다 발견. 전용 핸들러를 추가해 수정
+(Phase 6과 무관한 기존 버그지만, 배포 문서에 쓸 검증 문구의 정확성을
+위해 실측하다 나온 발견이라 같은 세션에서 수정)
 
 ---
 
@@ -549,3 +581,53 @@ docker exec -it quantlab-redis redis-cli
 - 실제 OAuth 라운드트립(구글/카카오/네이버 콘솔 등록 여부)은 이
   세션에서 검증 불가 - 사용자가 직접 확인 필요
 - CLAUDE.md Phase 6(배포)가 마지막 미완 Phase
+
+### 2026-07-09 - Phase 6 배포 아티팩트 준비(컨테이너화 + CI/CD)
+
+**변경 사항**
+- 단일 EC2 + nginx 리버스 프록시 아키텍처로 Docker Compose 전체화:
+  애플리케이션 3종 Dockerfile, `docker-compose.prod.yml`, nginx
+  same-origin 프록시 설정. 실제로 로컬에서 3개 이미지 빌드 + 전체
+  스택 기동까지 검증(자세한 내용은 Phase 6 섹션 참고)
+- GitHub Actions CI(`ci.yml`: gradle build + pytest + lint/build 3잡
+  병렬) + CD(`deploy.yml`: GHCR 푸시 → SSH로 EC2 pull/up) 워크플로 추가
+- `docs/DEPLOYMENT.md` 신규: EC2 사전준비부터 최초 기동, GitHub Secrets,
+  OAuth 운영 도메인 재등록, 롤백까지 런북 형태로 정리
+- 배포 검증 도중 발견한 사이드 버그 수정: `GlobalExceptionHandler`의
+  catch-all이 모든 404 상황을 500으로 응답하던 문제(상세는 Phase 6
+  섹션 및 해당 fix 커밋 참고)
+
+**변경 파일**
+- `backend/Dockerfile`, `quant-engine/Dockerfile`, `frontend/Dockerfile`,
+  각 `.dockerignore`, `frontend/nginx.conf` — 컨테이너화
+- `docker-compose.prod.yml`, `.env.prod.example`,
+  `backend/api/src/main/resources/application-prod.yml`, `.gitignore` — prod 구성
+- `backend/.../common/exception/GlobalExceptionHandler.java` +
+  신규 테스트 — 404/500 버그 수정
+- `.github/workflows/ci.yml`, `.github/workflows/deploy.yml` — CI/CD
+- `docs/DEPLOYMENT.md`(신규), `CLAUDE.md` Phase 6 — 문서
+
+**결정 사항**
+- `docker-compose.prod.yml`에 `name: quantlab-prod`를 명시해 dev용
+  compose와 프로젝트명(컨테이너·볼륨)을 분리 - 로컬 검증 중 실제로
+  겹치는 것을 발견하고 나서 수정(Phase 6 섹션에 상세 기록)
+- 컨테이너 시크릿은 `.env.prod`(gitignore) 하나로 통일하고, compose
+  파일에서 `${VAR}` 치환과 `env_file:` 컨테이너 주입 둘 다 이 파일
+  하나를 가리키게 함 - 대신 compose 실행 시 항상
+  `--env-file .env.prod`를 명시해야 함을 문서에 남김(docker compose가
+  기본으로는 `.env`만 자동 로드하기 때문)
+- AWS EC2 실제 프로비저닝·시크릿 등록·배포 실행은 이 세션에서 수행할
+  수 없어(계정 접근 불가) 아티팩트+런북 준비까지만 진행 - 사용자가
+  직접 진행
+
+**다음 작업**
+- AWS EC2 실배포(프로비저닝, GitHub Secrets 등록, 첫 `docker compose up`)는
+  사용자가 `docs/DEPLOYMENT.md`를 따라 직접 진행해야 함
+- 배포 도메인이 정해지면 OAuth 콘솔 redirect URI 재등록 + TLS(certbot)
+  적용 필요(`docs/DEPLOYMENT.md` §6, §7에 안내만 남겨둠)
+- 작업 트리에 이 세션 범위 밖의 로컬 미커밋 변경 2건이 남아있음
+  (`backend/api/src/main/resources/data/krx-stocks.csv`를 전체 KRX
+  종목 2706개로 교체, `docs/DEVELOPMENT.md`에 quant-engine 실행 안내
+  보강) - 사용자 확인상 아직 미완성/검토 전이라 이번 세션 커밋에서
+  의도적으로 제외함. 다음 세션에서 검토 후 별도 커밋 필요
+- 실제 OAuth 라운드트립은 여전히 미검증(위 항목과 별개)
