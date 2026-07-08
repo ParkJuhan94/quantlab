@@ -232,6 +232,25 @@ spring:
 - [x] Spring Boot 프로젝트 초기 세팅 (멀티모듈: api, core, common, event)
 - [x] 토스증권 API 연동 모듈 (토큰 발급 + 시세/캔들 조회)
 - [x] 종목 마스터 적재 (KRX CSV + ApplicationRunner 자동 적재)
+  - 초기 CSV(`krx-stocks.csv`)가 실제로는 대형주 24종목만 담긴 샘플
+    데이터였음(전체 상장사인 것처럼 보였으나 검색에 안 나오는 종목이
+    많다는 사용자 리포트로 발견) - KRX 정보데이터시스템(data.krx.co.kr)
+    정식 API는 최근 로그인 세션을 요구하도록 바뀌어(`400 LOGOUT`)
+    대신 KIND(kind.krx.co.kr)의 공개 상장법인목록 다운로드로 코스피+
+    코스닥+코넥스 2,706종목(스팩 등 표준 6자리 코드가 아닌 종목·중복
+    행 제외)을 받아 CSV를 교체. 이미 있던 24건은 그대로 두고 나머지만
+    INSERT해 기존 관심종목/시세/스코어 이력 보존
+  - 신규상장·상장폐지가 생겨도 CSV 재교체 없이 반영되도록
+    `StockMasterSyncScheduler`(주 1회, 일요일 03:00) 추가 -
+    `StockMasterSyncService.syncStockMaster()`가 KIND 최신 목록과
+    DB를 비교해 신규 코드는 등록(`LISTED`), DB에는 있는데 KIND
+    목록에서 사라진 코드는 `updateListingStatus(DELISTED)`로 표시(삭제
+    아님, 기존 시세/스코어 이력 보존). 수동 트리거는
+    `POST /dev/stock-master/sync`(dev 프로필 전용)
+  - KIND corpList.do는 문서화된 API가 아니라 "Content-Type:
+    application/vnd.ms-excel"을 자칭하는 HTML 테이블 응답이라 jsoup으로
+    파싱(`infra/kind` 패키지, Toss 클라이언트와 동일한
+    `ExternalApiInvoker`/`ErrorCode` 패턴 재사용)
 - [x] 일별 OHLCV 수집 Scheduler (매일 16:00 MON-FRI)
   - 최신 캔들의 거래일이 오늘 날짜와 정확히 일치해야만 저장하는 필터가
     있었는데, 장 마감 직후~자정 사이가 아니면 토스의 "최신" 캔들은

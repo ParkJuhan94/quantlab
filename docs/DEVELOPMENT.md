@@ -14,11 +14,24 @@ docker-compose up -d
 # 2) 백엔드 (dev 프로필이 application.yml 기본값)
 cd backend && ./gradlew :api:bootRun
 
-# 3) 프론트엔드 (최초 1회만 .env.local 준비)
+# 3) quant-engine (최초 1회만 venv 준비, Spring과 별도 프로세스로 항상 띄워야 함)
+cd quant-engine
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt   # 최초 1회
+source venv/bin/activate
+uvicorn main:app --reload --port 8000
+
+# 4) 프론트엔드 (최초 1회만 .env.local 준비)
 cd frontend
 cp .env.example .env.local   # VITE_API_BASE_URL=http://localhost:8080 정도면 충분
 npm run dev                   # http://localhost:3001 고정(strictPort)
 ```
+
+quant-engine이 꺼져 있으면 관심종목 등록/배치 시 스코어 계산만 조용히
+실패한다(`WatchlistService`가 스코어 계산을 별도 스레드 +
+`SafeExecutor`로 감싸둬서 등록 API 자체는 성공 응답을 반환하고, 로그에
+`ExternalApiException` / `ConnectException`만 남는다). 관심종목 등록은
+됐는데 스코어가 안 보이면 제일 먼저 `curl localhost:8000/docs`로
+quant-engine 생존 여부부터 확인할 것.
 
 ### 개발용 로그인 — 실제 OAuth 콘솔 등록 없이 인증 화면 검증하기
 
