@@ -153,38 +153,38 @@ quantlab/
 
 ---
 
-## 5. 환경변수 (application.yml)
+## 5. 환경변수
 
-```yaml
-toss:
-  client-id: ${TOSS_CLIENT_ID}
-  client-secret: ${TOSS_CLIENT_SECRET}
-  base-url: ${TOSS_BASE_URL:https://openapi.tossinvest.com}
+전체 목록과 기본값은 `backend/.env.example`(로컬)·`.env.prod.example`
+(배포, `docs/DEPLOYMENT.md` 참고)이 실제 소스이므로 여기서 따로
+복제하지 않는다 — 항목이 늘어날 때마다 이 문서를 같이 갱신해야 하는
+중복 유지보수 부담을 피하기 위함(이번 문서 정리 중 여기 있던 옛 YAML
+스니펫이 JWT·OAuth·CORS 등 절반 이상의 실제 설정을 안 담은 채 방치돼
+있던 걸 발견해 제거함).
 
-python-engine:
-  base-url: ${PYTHON_ENGINE_URL:http://localhost:8000}
-
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3308/quantlab?serverTimezone=Asia/Seoul
-    username: ${DB_USER}
-    password: ${DB_PASSWORD}
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: 6379
-```
-
-`.env` 파일로 로컬 관리, `.gitignore`에 반드시 포함.
+로컬은 `backend/.env` 파일로 관리하고 `.gitignore`에 반드시 포함(이미
+포함돼 있음). 배포용 `.env.prod`도 동일하게 gitignore 대상.
 
 ---
 
 ## 6. 핵심 기능 & API 명세
 
+### 인증
+| Method | URI | 설명 |
+|---|---|---|
+| POST | `/api/auth/login/{provider}` | 소셜 로그인(구글/카카오/네이버 인가 코드 → 토큰 발급) |
+| POST | `/api/auth/reissue` | 리프레시 토큰으로 액세스/리프레시 토큰 재발급 |
+| POST | `/api/auth/logout` | 현재 사용자의 리프레시 토큰 무효화 |
+
+### 종목
+| Method | URI | 설명 |
+|---|---|---|
+| GET | `/api/stocks/{stockCode}` | 종목 상세 조회 |
+| GET | `/api/stocks/search?q={keyword}` | 종목명/코드 검색(페이징) |
+
 ### 관심 종목
 | Method | URI | 설명 |
 |---|---|---|
-| GET | `/api/stocks/search?q={keyword}` | 종목명/코드 검색 |
 | GET | `/api/watchlist` | 관심 종목 목록 |
 | POST | `/api/watchlist/{stockCode}` | 관심 종목 등록 |
 | DELETE | `/api/watchlist/{stockCode}` | 관심 종목 해제 |
@@ -192,8 +192,8 @@ spring:
 ### 시세 & 차트
 | Method | URI | 설명 |
 |---|---|---|
-| GET | `/api/stocks/{stockCode}/price` | 현재가 조회 |
-| GET | `/api/stocks/{stockCode}/chart?period=daily` | 일봉 차트 데이터 |
+| GET | `/api/stocks/{stockCode}/price` | 현재가 조회(시세 없으면 `price=null`, 404 아님) |
+| GET | `/api/stocks/{stockCode}/chart?period=daily&days={1~365, 기본 90}` | 일봉 차트 데이터(`period`는 현재 `daily`만 지원) |
 
 ### 스코어
 | Method | URI | 설명 |
@@ -297,12 +297,26 @@ spring:
 ### ✅ Phase 2 — 도메인 API (완료)
 - [x] 소셜 로그인(구글/카카오/네이버) + JWT 인증 (Access/Refresh, Redis 저장)
 - [x] 종목 검색 API
+  - 검색은 `q`(필수, 공백 불가) + `page`/`size` 페이징(`Slice`) 조합.
+    빈/공백 검색어를 막지 않으면 `Containing("")`가 전체 매칭이 돼버려
+    `@NotBlank`로 사전 차단
 - [x] 관심 종목 CRUD (사용자별 스코핑)
   - 최초 계획은 "단일 사용자, 인증 없음" 전제였는데, 인증 도입을
     Part B(관심 종목) 착수 전에 계획 문서에 먼저 반영 - Watchlist
     유니크 제약을 (user_id, stock_id) 복합으로, 리포지토리/서비스/
     컨트롤러 시그니처 전부에 userId를 반영한 뒤 구현 시작
+  - 목록 조회는 `Slice` 페이징이 아니라 `List` 그대로 반환 - 한 사용자의
+    관심 종목 규모가 페이징이 필요할 만큼 커지지 않아 YAGNI로 판단
+  - 조인은 QueryDSL이 아니라 JPQL `join fetch` 고정 쿼리 하나로 처리 -
+    9.8 컨벤션의 QueryDSL 권장은 "복잡한 쿼리"에 한정되고, 이 조인은
+    조건 분기 없는 단순 fetch라 QueryDSL 도입이 과함
 - [x] 현재가 / 차트 API
+  - `PriceController`를 `StockController`와 분리한 신설 컨트롤러로
+    둠 - 종목 도메인 컨트롤러에 시세 도메인 의존이 스며드는 것을 방지
+  - 시세가 없는 종목은 404가 아니라 200 + `price=null` - 종목 자체는
+    존재가 검증됐고 "지금 시세가 없음"은 리소스 부재가 아니라는 판단
+  - 차트는 `days`(`@Min(1) @Max(365)`, 기본 90) 파라미터로 조회 기간을
+    조절, `period`는 현재 `daily`만 허용(다른 값은 400)
 
 ### ✅ Phase 3 — Python 퀀트 엔진 (완료)
 - [x] FastAPI 프로젝트 세팅
