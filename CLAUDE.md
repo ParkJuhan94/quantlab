@@ -367,8 +367,31 @@ spring:
     불가(사용자 AWS 계정·시크릿 필요) - `docs/DEPLOYMENT.md` 런북으로
     안내
 - [ ] AWS EC2 배포 — **사용자가 직접 진행해야 하는 부분**(EC2 프로비저닝,
-  보안그룹, GitHub Secrets 등록, OAuth 콘솔 운영 도메인 등록).
-  절차는 `docs/DEPLOYMENT.md` 참고
+  Elastic IP, IAM 인스턴스 역할, 보안그룹, GitHub Secrets 등록, OAuth
+  콘솔 운영 도메인 등록). 절차는 `docs/DEPLOYMENT.md` 참고
+- [x] 로그 수집 / 모니터링·알림 / DB 백업 (아티팩트 준비 완료)
+  - 로그: `docker-compose.cloudwatch.yml`(신규 오버레이) - 5개 서비스
+    모두 `awslogs` 드라이버로 `/quantlab/{서비스명}` 로그 그룹에 전송.
+    `docker-compose.prod.yml` 본체에 안 넣은 이유는 `awslogs` 드라이버가
+    컨테이너 기동 시점에 AWS 자격증명을 요구해서, 넣었으면 Phase 6에서
+    확립해둔 로컬 빌드 검증 경로(`docker compose -f docker-compose.prod.yml
+    build`)가 깨졌을 것 - `docker compose -f docker-compose.prod.yml
+    -f docker-compose.cloudwatch.yml config`로 로컬에서 머지만 검증(실제
+    AWS 전송은 EC2 몫)
+  - 모니터링/알림: CloudWatch Agent 대신 `scripts/report-health-metric.sh`
+    (헬스체크·메모리·디스크 3개를 커스텀 메트리 네임스페이스로 전송,
+    cron 5분 간격) - Agent는 설치·설정 파일이 필요해 이 규모엔 과함,
+    커스텀 메트릭은 계정당 10개까지 상시 무료라 비용 차이도 없음(사용자
+    확인 후 채택). SNS 알람 4종(EC2 상태·앱 헬스체크·디스크·메모리)은
+    콘솔/CLI 절차만 문서화(실제 생성은 사용자 몫)
+  - DB 백업: `scripts/backup-mysql.sh` - 컨테이너 안에서 mysqldump(대상
+    DB만) → gzip → S3, 로컬엔 최근 3개만 보관하고 장기 보존은 스크립트가
+    아니라 S3 라이프사이클(30일 만료)에 위임. Redis는 캐시일 뿐이라
+    (유실돼도 재폴링·재계산되는 파생 데이터) 백업 대상에서 제외
+  - `scripts/install-cron.sh`: 위 두 스크립트를 멱등하게(마커 주석으로
+    중복 방지) crontab에 등록
+  - IAM: 액세스 키 대신 EC2 인스턴스 프로파일(Role)로 S3/CloudWatch
+    권한 부여 - 정책 JSON은 `docs/DEPLOYMENT.md` §5
 
 배포 검증 도중 발견한 사이드 버그 1건: `GlobalExceptionHandler`의
 catch-all(`@ExceptionHandler(Exception.class)`)이 Spring 6의
@@ -650,3 +673,47 @@ docker exec -it quantlab-redis redis-cli
   보강) - 사용자 확인상 아직 미완성/검토 전이라 이번 세션 커밋에서
   의도적으로 제외함. 다음 세션에서 검토 후 별도 커밋 필요
 - 실제 OAuth 라운드트립은 여전히 미검증(위 항목과 별개)
+
+### 2026-07-09 - Phase 6 확장(Elastic IP, 로그/모니터링/백업)
+
+**변경 사항**
+- 사용자가 EC2 작업을 세분화해달라고 요청하는 과정에서 런북의 공백
+  2건을 발견: Elastic IP 미언급(재시작마다 IP 바뀌어 도메인·OAuth
+  redirect URI 깨짐), 운영 필수 3종(모니터링/알림·DB 백업·로그 수집)
+  미설계
+- `docs/DEPLOYMENT.md` §1에 Elastic IP 할당 단계 추가, §5~§8로 IAM
+  인스턴스 역할·로그 수집·모니터링/알림·DB 백업 신규 섹션 삽입(기존
+  §5~§8은 §9~§12로 재배치)
+- 모니터링 구현 방식은 CloudWatch Agent(공식·풍부하지만 설치/설정
+  파일 필요) vs 경량 셸 스크립트+cron(설치 불필요, 비용은 사실상
+  동일 - 커스텀 메트릭 계정당 10개 상시 무료) 중 사용자에게 트레이드
+  오프를 설명하고 확인받아 경량 스크립트로 결정
+- 상세는 Phase 6 섹션 참고
+
+**변경 파일**
+- `docker-compose.cloudwatch.yml`(신규) - EC2 전용 로그 오버레이
+- `scripts/report-health-metric.sh`, `scripts/backup-mysql.sh`,
+  `scripts/install-cron.sh`(신규)
+- `.env.prod.example` - AWS_REGION, BACKUP_S3_BUCKET 추가
+- `.github/workflows/deploy.yml` - compose 명령에 cloudwatch 오버레이 추가
+- `docs/DEPLOYMENT.md` - Elastic IP + 로그/모니터링/백업 4개 섹션 신설
+- `CLAUDE.md` Phase 6 - 이번 확장 반영
+
+**결정 사항**
+- `docker-compose.cloudwatch.yml`을 본체(`docker-compose.prod.yml`)와
+  분리 - `awslogs` 드라이버가 기동 시 AWS 자격증명을 요구해서, 합쳐
+  넣으면 Phase 6에서 확립한 로컬 빌드/기동 검증 경로가 AWS 자격증명
+  없는 로컬 환경에서 깨진다. `docker compose ... config`로 머지만
+  로컬 검증(실제 전송은 EC2에서만 가능해 검증 불가)
+- MySQL 백업은 set -e로 실패 시 즉시 중단(반쪽 백업 방지), 헬스/리소스
+  지표 스크립트는 set -e 없이 지표 하나 실패해도 나머지는 계속
+  보고(무응답과 "지표 자체가 안 옴"을 알람에서 구분 가능하게)
+- CloudWatch 알람의 헬스체크 항목은 `treat-missing-data breaching`으로
+  설정하도록 문서화 - 지표가 아예 안 올라오는 것(cron 죽음, 인스턴스
+  응답 없음)도 정상(OK)이 아니라 알람으로 처리돼야 함
+
+**다음 작업**
+- 이 확장분도 §5(IAM 역할)~§8(백업) 전부 사용자가 EC2에서 직접
+  프로비저닝·검증해야 함 - AWS 리소스라 이 세션에서 생성 불가
+- 나머지 미완 항목(AWS EC2 실배포, OAuth 라운드트립, 세션 범위 밖
+  로컬 변경 2건 검토)은 위 항목과 동일하게 유지
