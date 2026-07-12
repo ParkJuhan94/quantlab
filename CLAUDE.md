@@ -3,6 +3,21 @@
 > 이 파일은 Claude Code가 프로젝트 컨텍스트를 유지하기 위한 핵심 문서다.
 > 개발 진행 중 변경사항이 생기면 이 파일을 먼저 업데이트할 것.
 
+## 목차
+
+- [1. 프로젝트 개요](#1-프로젝트-개요)
+- [2. 디렉토리 구조](#2-디렉토리-구조)
+- [3. 기술 스택](#3-기술-스택)
+- [4. 외부 API](#4-외부-api)
+- [5. 환경변수](#5-환경변수)
+- [6. 핵심 기능 & API 명세](#6-핵심-기능-api-명세)
+- [7. 기술적 지표 스코어링 로직](#7-기술적-지표-스코어링-로직)
+- [8. 개발 Phase 현황](#8-개발-phase-현황) (Phase 0~6은 완료돼 접혀 있음 — 클릭해서 펼치기)
+- [9. 코드 컨벤션](#9-코드-컨벤션)
+- [10. 주의사항 / 금지사항](#10-주의사항-금지사항)
+- [11. 자주 쓰는 명령어](#11-자주-쓰는-명령어)
+- [작업 기록](#작업-기록) (세션별로 접혀 있음 — 클릭해서 펼치기)
+
 ---
 
 ## 1. 프로젝트 개요
@@ -17,6 +32,9 @@
 ---
 
 ## 2. 디렉토리 구조
+
+<details>
+<summary>펼쳐서 보기</summary>
 
 ```
 quantlab/
@@ -92,6 +110,8 @@ quantlab/
         ├── types/                # 백엔드 DTO 미러링
         └── config/               # env.ts, oauth.ts(authorize URL 빌더)
 ```
+
+</details>
 
 ---
 
@@ -248,10 +268,16 @@ quantlab/
 
 ## 8. 개발 Phase 현황
 
-### ✅ Phase 0 — 기획 완료
+<details>
+<summary>✅ Phase 0 — 기획 완료</summary>
+
 - 프로젝트 방향, 기술 스택, API 명세, DB 스키마 확정
 
-### ✅ Phase 1 — 데이터 파이프라인 (완료)
+</details>
+
+<details>
+<summary>✅ Phase 1 — 데이터 파이프라인 (완료)</summary>
+
 - [x] Spring Boot 프로젝트 초기 세팅 (멀티모듈: api, core, common, event)
 - [x] 토스증권 API 연동 모듈 (토큰 발급 + 시세/캔들 조회)
 - [x] 종목 마스터 적재 (KRX CSV + ApplicationRunner 자동 적재)
@@ -294,7 +320,11 @@ quantlab/
     페이지 처리 "전"에만 검사되기 때문) - 정확히 자르기보다 단순함을
     택한 의도적 트레이드오프(장기 지표 계산엔 여유분이 오히려 유리)
 
-### ✅ Phase 2 — 도메인 API (완료)
+</details>
+
+<details>
+<summary>✅ Phase 2 — 도메인 API (완료)</summary>
+
 - [x] 소셜 로그인(구글/카카오/네이버) + JWT 인증 (Access/Refresh, Redis 저장)
 - [x] 종목 검색 API
   - 검색은 `q`(필수, 공백 불가) + `page`/`size` 페이징(`Slice`) 조합.
@@ -318,7 +348,11 @@ quantlab/
   - 차트는 `days`(`@Min(1) @Max(365)`, 기본 90) 파라미터로 조회 기간을
     조절, `period`는 현재 `daily`만 허용(다른 값은 400)
 
-### ✅ Phase 3 — Python 퀀트 엔진 (완료)
+</details>
+
+<details>
+<summary>✅ Phase 3 — Python 퀀트 엔진 (완료)</summary>
+
 - [x] FastAPI 프로젝트 세팅
 - [x] 지표 계산 (RSI, MACD, 볼린저밴드, 거래량, 이평) + 스코어링(v2, 추세추종/평균회귀 분리)
 - [x] Spring 연동 (Spring -> POST /calculate/score/batch 호출, 점수 영속화, 조회 API)
@@ -337,7 +371,11 @@ quantlab/
       트랜잭션 경계, 배치 저장 항목별 격리, N+1 등)은 `ScorePersistenceService`
       분리를 포함한 별도 커밋들로 수정 완료
 
-### ✅ Phase 4 — WebSocket 실시간 (완료)
+</details>
+
+<details>
+<summary>✅ Phase 4 — WebSocket 실시간 (완료)</summary>
+
 - [x] STOMP 세팅 (`/ws/stocks`, SockJS, `/topic` 심플 브로커)
 - [x] Toss 현재가 폴링 → STOMP 브로드캐스트
   - 토스증권 API가 WebSocket 미지원이라(§4) REST 폴링(기본 3초) →
@@ -353,7 +391,11 @@ quantlab/
 - [x] Redis 시세 캐싱 (`PriceCacheStore`) - 브로드캐스트 스냅샷을
   적재하고, 기존 현재가 조회 API도 이를 먼저 조회하는 read-through로 재사용
 
-### ✅ Phase 5 — 프론트엔드 (완료)
+</details>
+
+<details>
+<summary>✅ Phase 5 — 프론트엔드 (완료)</summary>
+
 - [x] React 초기 세팅 (Vite + React 19 + TS + Tailwind CSS v4, 포트 3001 고정)
   - 인증은 프론트엔드가 OAuth authorize URL을 직접 만들어 브라우저를
     리다이렉트하는 구조(백엔드엔 authorize 엔드포인트가 없음) - code만
@@ -378,7 +420,11 @@ quantlab/
 관심종목 추가·삭제, 실시간 시세 구독 프레임, 차트·스코어 렌더, 대시보드
 정렬까지) - 자세한 내용은 각 기능 커밋 메시지 참고.
 
-### 🟡 Phase 6 — 배포 (아티팩트 준비 완료, 실제 EC2 배포는 사용자 진행 필요)
+</details>
+
+<details>
+<summary>🟡 Phase 6 — 배포 (아티팩트 준비 완료, 실제 EC2 배포는 사용자 진행 필요)</summary>
+
 - [x] Docker Compose (단일 EC2 + nginx 리버스 프록시 아키텍처)
   - 애플리케이션 3종 Dockerfile(`backend/Dockerfile`·`quant-engine/Dockerfile`·
     `frontend/Dockerfile`) + `docker-compose.prod.yml` 신규 작성.
@@ -437,6 +483,8 @@ catch-all(`@ExceptionHandler(Exception.class)`)이 Spring 6의
 정말 404가 되는지 실제로 검증하려다 발견. 전용 핸들러를 추가해 수정
 (Phase 6과 무관한 기존 버그지만, 배포 문서에 쓸 검증 문구의 정확성을
 위해 실측하다 나온 발견이라 같은 세션에서 수정)
+
+</details>
 
 ### 🔵 Phase 7 — 기능 확장 (기획 중)
 
@@ -644,7 +692,8 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
 
 ## 작업 기록
 
-### 2026-07-08 - 프론트엔드 검증 보강 + 다듬기 + 개발 가이드 문서화
+<details>
+<summary>2026-07-08 - 프론트엔드 검증 보강 + 다듬기 + 개발 가이드 문서화</summary>
 
 **변경 사항**
 - Phase 5(프론트엔드) 완료 후 미검증 상태였던 시나리오를 Playwright
@@ -689,7 +738,10 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   세션에서 검증 불가 - 사용자가 직접 확인 필요
 - CLAUDE.md Phase 6(배포)가 마지막 미완 Phase
 
-### 2026-07-09 - Phase 6 배포 아티팩트 준비(컨테이너화 + CI/CD)
+</details>
+
+<details>
+<summary>2026-07-09 - Phase 6 배포 아티팩트 준비(컨테이너화 + CI/CD)</summary>
 
 **변경 사항**
 - 단일 EC2 + nginx 리버스 프록시 아키텍처로 Docker Compose 전체화:
@@ -739,7 +791,10 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   의도적으로 제외함. 다음 세션에서 검토 후 별도 커밋 필요
 - 실제 OAuth 라운드트립은 여전히 미검증(위 항목과 별개)
 
-### 2026-07-09 - Phase 6 확장(Elastic IP, 로그/모니터링/백업)
+</details>
+
+<details>
+<summary>2026-07-09 - Phase 6 확장(Elastic IP, 로그/모니터링/백업)</summary>
 
 **변경 사항**
 - 사용자가 EC2 작업을 세분화해달라고 요청하는 과정에서 런북의 공백
@@ -783,7 +838,10 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
 - 나머지 미완 항목(AWS EC2 실배포, OAuth 라운드트립, 세션 범위 밖
   로컬 변경 2건 검토)은 위 항목과 동일하게 유지
 
-### 2026-07-11 - 네이버 로그인 닉네임 필수 오류 수정 (+ 카카오 방어 로직 동기화)
+</details>
+
+<details>
+<summary>2026-07-11 - 네이버 로그인 닉네임 필수 오류 수정 (+ 카카오 방어 로직 동기화)</summary>
 
 **변경 사항**
 - 실서버 로그에서 네이버 로그인 시 `IllegalArgumentException: 닉네임은 필수입니다.`
@@ -821,7 +879,10 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   `docs/DEPLOYMENT.md`, `frontend/README.md`, 프론트 차트 지표 관련
   3개 파일)는 이번 세션 범위 밖이라 그대로 둠 - 다음 세션에서 검토 필요
 
-### 2026-07-11 - 종목 로고 표시(네이버 금융 비공식 정적 경로 연동)
+</details>
+
+<details>
+<summary>2026-07-11 - 종목 로고 표시(네이버 금융 비공식 정적 경로 연동)</summary>
 
 **변경 사항**
 - 토스증권 Open API 스펙(`toss-openapi.json`)에 로고/이미지 필드가 전혀
@@ -865,3 +926,87 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   `docs/DEPLOYMENT.md`, `frontend/README.md`, `CandleChart.tsx`,
   `config/oauth.ts`, `IndicatorControls.tsx`, `utils/indicators.ts`)는
   여전히 이번 세션 범위 밖이라 그대로 둠 - 다음 세션에서 검토 필요
+
+</details>
+
+<details>
+<summary>2026-07-12 - 홈 화면 리디자인(claude.ai/design 시안 "Quantlab 토스증권 UI 리디자인" 반영)</summary>
+
+**변경 사항**
+- claude.ai/design 프로젝트에서 가져온 시안(`Quantlab Screener.dc.html`,
+  turn t3/옵션 2c "홈")을 기준으로 `/`(기존 `WatchlistPage`)를 새
+  `HomePage`로 교체 - 검색 오버레이, 주요 지수 위젯, 실시간 시세
+  랭킹 테이블, 접이식 우측 패널(관심/최근 본/실시간 탭)로 구성.
+  같은 시안의 피드(커뮤니티 게시판, turn t5) 화면은 사용자 확인 후
+  이번 범위에서 제외 - `/feed`는 시안 자체가 쓰던 "준비 중" 플레이스홀더
+  패턴을 그대로 재사용
+- 시안에는 있지만 실제 백엔드가 없는 기능(전종목 실시간 랭킹·시장 지수는
+  `docs/ROADMAP.md` Phase 7 기획 중, 관심종목 그룹·최근 본·AI 코멘트
+  배너 등은 아예 계획에도 없음)을 어떻게 다룰지 사용자에게 먼저 확인:
+  "백엔드 없는 기능은 프론트 목/로컬 상태로" 결정
+  - 실시간 시세 랭킹 테이블·주요 지수 위젯: `frontend/src/mock/marketMock.ts`에
+    예시 숫자로 구현하되, 종목 코드는 실제 DB에 있는 종목(삼성전자·
+    SK하이닉스 등 8종)을 그대로 써서 로고·클릭 시 상세 이동·관심종목
+    등록/해제·실시간 소켓 시세는 전부 진짜로 동작함 - 등락률/거래대금/
+    시가총액만 화면용 예시 숫자. UI에도 "예시 데이터" 캡션을 노출해
+    실데이터로 오인되지 않게 함
+  - 최근 본 종목: 실제 기능으로 구현(`localStorage` 기반,
+    `StockDetailPage` 방문 시 자동 기록) - 백엔드 없이도 정직하게 만들
+    수 있는 기능이라 목이 아니라 진짜로 동작하게 함
+  - 관심종목 다중 그룹 관리(그룹 생성/이름변경/삭제), "AI 요약" 인사이트
+    배너, 의견 피드백 모달, 설정 아이콘, 환율/원화 표시 토글, 종목 상세
+    슬라이드오버(시안은 차트/스코어/공시를 패널로 재구현했으나 실제
+    앱엔 이미 완전한 `/stocks/:code` 페이지가 있음)는 전부 제외 - 저장도
+    안 되는데 저장되는 것처럼 보이는 가짜 관리 UI, 실제로 아무 데도
+    전송되지 않는 피드백 폼처럼 사용자를 속이는 형태가 되거나, 이미
+    있는 기능을 목적 없이 중복 구현하게 되는 경우라 판단
+- Tailwind v4 `@theme`에 `--color-accent`(#3752ff)·`--font-logo`
+  (Space Grotesk) 추가, `AppHeader`를 로고 마크 + 검색 트리거("/"
+  단축키) + 홈/피드 내비게이션으로 재작성
+
+**변경 파일**
+- `frontend/src/pages/HomePage.tsx`(신규), `frontend/src/pages/
+  FeedPlaceholderPage.tsx`(신규) - `WatchlistPage.tsx` 대체(삭제)
+- `frontend/src/components/home/{MarketIndexRow,RankingTable,
+  HomeSidePanel}.tsx`(신규)
+- `frontend/src/components/search/SearchOverlay.tsx`(신규) - 기존
+  `useStockSearch`/`useDebouncedValue`/`SearchResultItem` 재사용
+- `frontend/src/mock/marketMock.ts`(신규), `frontend/src/storage/
+  {searchHistoryStorage,recentlyViewedStorage}.ts`(신규,
+  `tokenStorage.ts` 패턴 재사용), `frontend/src/utils/stockLogo.ts`(신규)
+- `frontend/src/components/layout/AppHeader.tsx`, `frontend/src/App.tsx`
+  (라우트: `/` → `HomePage`, `/feed` 추가), `frontend/src/pages/
+  StockDetailPage.tsx`(최근 본 기록 추가), `frontend/index.html`,
+  `frontend/src/index.css`
+
+**결정 사항**
+- `/`, `/feed`를 기존과 동일하게 `ProtectedRoute` 하위에 유지(비로그인
+  홈 공개 열람으로 바꾸지 않음) - 관심종목 조회가 401 재발급 실패 시
+  로그인으로 리다이렉트시키는 기존 인터셉터 로직과 충돌해 별도 인증
+  구조 변경이 필요해지므로, 이번 범위(홈 화면 UI) 밖의 결정으로 보고
+  현행 유지
+- 실시간 랭킹 테이블에 있던 "해외" 스코프 필터·통화($/원) 토글은
+  구현하지 않음 - QuantLab은 "국내 주식 한정"(§1)이 제품 범위이고
+  시안의 해외종목 예시는 이 제품엔 애초에 해당하지 않는 개념이라
+  판단. 다만 나스닥/S&P500 등 해외 지수 "위젯"은 `docs/ROADMAP.md` #1이
+  이미 정보성 표시로 계획하고 있어 그대로 유지
+- 실제 백엔드로 로컬 검증: `docker-compose` 인프라 + 백엔드 `bootRun` +
+  프론트 `npm run dev` 기동 후 Playwright로 검색→종목 상세 이동,
+  랭킹 테이블 하트 클릭→실제 관심종목 등록/해제, 최근 본 탭 자동 기록,
+  패널 접기/펼치기, `/feed`·`/dashboard` 라우팅까지 실제 브라우저로 확인
+  (테스트 중 등록한 NAVER는 검증 후 원상복구)
+
+**다음 작업**
+- 피드(커뮤니티 게시판) 화면은 여전히 미착수 - `docs/ROADMAP.md` #4
+  (기술 난이도 하, 범위는 중) 참고해 다음 세션에서 별도로 설계 필요
+- `docs/ROADMAP.md`가 분석한 실제 기능들(전종목 실시간 랭킹, 지수
+  위젯, AI 요약)은 여전히 미착수 - 이번 세션은 그 자리를 UI로 먼저
+  채운 것이고, "권장 우선순위" 순서대로 착수하면 이번에 심어둔 예시
+  데이터를 실데이터로 교체하는 흐름이 됨
+- 세션 시작 시점부터 있던 미커밋 변경(`OAuthProperties.java`,
+  `GoogleOAuthClientTest.java`, `application.yml`, `.env.example` 2건,
+  `docs/DEPLOYMENT.md`, `frontend/README.md`, `config/oauth.ts`,
+  `IndicatorControls.tsx`, `utils/indicators.ts`)는 여전히 이번 세션
+  범위 밖이라 그대로 둠 - 다음 세션에서 검토 필요
+
+</details>
