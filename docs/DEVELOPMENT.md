@@ -7,24 +7,16 @@
 
 ## 1. 로컬 개발 환경 실행
 
-```bash
-# 1) 인프라 (MySQL 3308, Redis 6381)
-docker-compose up -d
+기본 실행 명령어(인프라/백엔드/Python 엔진/프론트엔드)는
+[`CLAUDE.md` §11](../CLAUDE.md#11-자주-쓰는-명령어) 참고. 아래는 최초
+1회만 필요한 준비 작업과, 그 명령어들만으로는 안 드러나는 주의사항이다.
 
-# 2) 백엔드 (dev 프로필이 application.yml 기본값)
-cd backend && ./gradlew :api:bootRun
-
-# 3) quant-engine (최초 1회만 venv 준비, Spring과 별도 프로세스로 항상 띄워야 함)
-cd quant-engine
-python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt   # 최초 1회
-source venv/bin/activate
-uvicorn main:app --reload --port 8000
-
-# 4) 프론트엔드 (최초 1회만 .env.local 준비)
-cd frontend
-cp .env.example .env.local   # VITE_API_BASE_URL=http://localhost:8080 정도면 충분
-npm run dev                   # http://localhost:3001 고정(strictPort)
-```
+- **quant-engine**: 최초 1회 `python3 -m venv venv && source venv/bin/activate
+  && pip install -r requirements.txt`로 가상환경을 준비해야 하고, Spring과
+  완전히 별도 프로세스라 `bootRun`을 띄워도 자동으로 같이 뜨지 않는다 -
+  둘 다 떠 있어야 관심종목 등록 시 스코어 계산이 된다.
+- **프론트엔드**: 최초 1회 `cp .env.example .env.local`로 환경변수 파일을
+  준비해야 한다(`VITE_API_BASE_URL=http://localhost:8080` 정도면 충분).
 
 quant-engine이 꺼져 있으면 관심종목 등록/배치 시 스코어 계산만 조용히
 실패한다(`WatchlistService`가 스코어 계산을 별도 스레드 +
