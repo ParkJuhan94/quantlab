@@ -45,6 +45,46 @@ quant-engine 생존 여부부터 확인할 것.
   ```bash
   redis-cli -p 6381 KEYS "price:current:*" | xargs -r redis-cli -p 6381 DEL
   ```
+- **Testcontainers가 "Could not find a valid Docker environment"로
+  실패**: `docker` CLI는 정상 동작하는데 `./gradlew :api:test`의
+  `MarketControllerTest`/`PriceControllerTest` 등 `ApiTestSupport` 하위
+  통합 테스트만 클래스 로딩 시점에 이 에러로 전부 실패한다면, **최신
+  Docker Desktop과 Testcontainers 라이브러리 버전 간 Docker Engine API
+  버전 비호환**을 의심할 것(2026-07-13 세션에서 실측 규명 - 이미
+  `backend/build.gradle`을 수정해뒀으므로 정상적으로는 이 문제를 다시
+  만날 일이 없지만, Docker Desktop을 업데이트한 뒤 재발하면 아래
+  절차로 확인).
+  - **증상 재현/진단**: `docker version`으로 서버의 `MinAPIVersion`을
+    확인하고, 그보다 낮은 버전으로 소켓에 직접 질의해본다.
+    ```bash
+    curl -s --unix-socket ~/.docker/run/docker.sock http://localhost/v1.24/info -o /dev/null -w '%{http_code}\n'
+    # 400이면 그 API 버전은 이 Docker Desktop 엔진이 거부한다는 뜻
+    curl -s --unix-socket ~/.docker/run/docker.sock http://localhost/info -o /dev/null -w '%{http_code}\n'
+    # 버전 없는 요청은 200 - 소켓 자체는 멀쩡하다는 뜻
+    ```
+    `./gradlew :api:test ... --info`로 돌리면 STDOUT에 Testcontainers가
+    시도한 각 전략(`UnixSocketClientProviderStrategy`,
+    `DockerDesktopClientProviderStrategy`)의 실패 사유가 그대로
+    찍힌다 - 둘 다 동일한 `BadRequestException (Status 400: ...)`이면
+    이 문제가 맞다. `DOCKER_API_VERSION` 환경변수로 강제 협상은 **안
+    먹힌다**(전략 탐지 자체가 버전을 하드코딩) - 라이브러리를 올려야
+    한다.
+  - **해결**: `backend/build.gradle`의 `testcontainers-bom` 버전을
+    올린다(1.20.4 → 1.21.4에서 실측 해결, 이후 더 최신 버전이 나오면
+    그쪽으로). `./gradlew :api:test :core:test`로 전체 스위트가
+    회귀 없이 통과하는지 반드시 재확인할 것.
+  - 참고: macOS 홈 디렉터리의 `~/.testcontainers.properties`에
+    `docker.client.strategy`가 낡은 값으로 박제돼 있는 경우도 있는데
+    (리포 안에는 이 파일이 없음 - 머신 전역 설정), 이건 위 API 버전
+    문제와는 **별개의 원인**이다. 지워도(자동 감지가 살아나도) 위
+    API 버전 비호환 자체는 해결되지 않으므로 혼동하지 말 것 - 실제로
+    2026-07-13 세션에서 처음엔 이 핀이 원인이라고 오판했다가, 핀을
+    지운 뒤에도 동일하게 재현되는 것을 보고서야 진짜 원인(API 버전
+    비호환)을 찾았다.
+  - Testcontainers가 Redis까지 격리하지는 않으므로, Redis(로컬
+    인프라, 6381)가 안 떠 있으면 위 문제를 다 해결해도 같은 통합
+    테스트가 이번엔 Redis 연결 실패로 다른 에러 메시지를 내며 깨진다
+    (증상이 다르므로 구분할 것).
 
 ---
 
