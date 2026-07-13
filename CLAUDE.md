@@ -644,9 +644,11 @@ com.quantlab/{feature}/
 - OHLCV 수집 배치는 장 마감(15:30) 이후에만 실행
 - 토스증권 API Rate Limit은 **초당 토큰 버킷** 방식 (일일 쿼터 없음, `X-RateLimit-Limit`은 초당 burst capacity, 매초 토큰 리필). `MARKET_DATA_CHART` 그룹 초당 한도(스펙 예시 10건) 기준 150ms 딜레이 유지. 429 시 `RATE_LIMIT_EXCEEDED`로 감지해 수 초 백오프 후 재시도(`X-RateLimit-Reset`/`Retry-After` 헤더 참고)
 - `*Repository extends JpaRepository<...>, *QueryRepository`(QueryDSL 커스텀 조합) 패턴에서, 커스텀 `*QueryRepositoryImpl`은 `@Repository`가 붙어 있어 JPA가 자동 구성하는 리포지토리 프록시와 별개로 그 자체로도 스프링 빈이 된다. 따라서 다른 클래스에서 주입받을 땐 반드시 조합된 구체 타입(`ScoreRepository`, `DailyPriceRepository` 등)을 쓸 것 - `*QueryRepository` 인터페이스를 직접 주입하면 "빈 2개 발견" 에러가 난다
-- `TestContainerSupport`는 MySQL만 Testcontainers로 격리하고 **Redis는 격리하지 않는다**(로컬 실제 Redis를 그대로 씀). Redis를 읽는 서비스(예: 현재가 조회의 read-through 캐시)를 다루는 통합 테스트는 관련 캐시/스토어 클래스를 `@MockBean`으로 격리할 것 - 그렇지 않으면 로컬에서 `bootRun`으로 남긴 캐시 값이 테스트 결과에 섞여 간헐적으로 실패한다
+- `TestContainerSupport`는 MySQL과 Redis 둘 다 Testcontainers로 격리한다(2026-07-13 세션에서 Redis 추가 - 이전엔 로컬 실제 Redis를 공유해 `bootRun` 잔여 캐시가 테스트에 섞이는 문제가 있었음). 다만 `@EnableScheduling`이 테스트 프로파일에서도 켜져 있어 `PriceBroadcastScheduler` 등 백그라운드 스케줄러가 같은 컨테이너에 비동기로 값을 채울 수 있다 - 캐시 미스/특정 상태를 결정적으로 검증해야 하는 테스트(`PriceControllerTest` 등)는 여전히 관련 캐시/스토어 클래스를 `@MockBean`으로 스텁할 것
+- 로컬에서 Testcontainers 통합 테스트가 "Could not find a valid Docker environment"로 실패했던 이슈는 2026-07-13 세션에서 근본 원인 규명 + 해결 완료(최신 Docker Desktop의 Engine API `MinAPIVersion`과 Testcontainers 1.20.4가 번들한 docker-java 클라이언트 간 버전 비호환 - `backend/build.gradle`의 `testcontainers-bom`을 1.21.4로 올려 해결, 여러 세션에 걸쳐 "원인 불명 환경 문제"/"버전 비호환 추정"으로만 남아있던 이슈). 같은 증상이 Docker Desktop 업데이트 후 재발하면 `docs/DEVELOPMENT.md` §1 "Testcontainers가 ... 실패" 참고(머신 전역 `~/.testcontainers.properties` 핀은 처음엔 원인으로 오판했던 별개 항목이니 혼동 주의)
 - Vite는 webpack과 달리 Node.js 전역을 자동 폴리필하지 않는다. `sockjs-client`처럼 `global`을 참조하는 라이브러리를 그대로 번들하면 브라우저에서 "global is not defined"로 페이지 전체가 깨진다 - `frontend/vite.config.ts`에 `define: { global: 'globalThis' }` 필요(이 문제는 해당 라이브러리를 실제로 번들에 포함시키는 순간에만 드러나므로, import만 추가하고 아직 렌더 경로에 안 걸린 코드에서는 안 잡힐 수 있음에 주의)
 - SockJS 클라이언트의 XHR 폴백 트랜스포트(`/ws/stocks/info` 핸드셰이크 등)는 기본적으로 `withCredentials: true`로 요청한다. REST API 인증 자체는 쿠키가 아니라 `Authorization` 헤더를 쓰더라도, 백엔드 CORS 설정에 `allowCredentials(true)`가 없으면 오리진이 일치해도 브라우저가 응답을 차단한다(`backend/api/.../auth/config/SecurityConfig.java`). 허용 오리진을 특정 값 하나로 고정해뒀다면(와일드카드 아님) 안전하게 켤 수 있다
+- **디자인(UI)이나 백엔드 로직을 수정할 때, 요청받은 범위를 벗어나 기존 코드의 구조·스타일·네이밍을 임의로 리팩터링하지 않는다.** 세션이 반복되며 관련 없는 기존 코드가 목적 없이 크게 바뀌어버리는 문제가 실제로 있었음(사용자 피드백, 2026-07-13) - 새 기능/수정은 기존 컴포넌트·패턴을 최대한 재사용하고 꼭 필요한 파일만 건드릴 것. "더 낫다"는 이유만으로 관련 없는 파일의 포매팅·순서·네이밍을 바꾸지 말고, 정말 필요한 리팩터링이면 별도로 제안해 승인받은 뒤 진행할 것(끼워넣기 금지). 전역 규칙은 `~/.claude/CLAUDE.md` "기존 코드 변경 범위 원칙" 참고
 
 ---
 
@@ -1107,6 +1109,10 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   전부 통과 + `docker-compose` 인프라로 띄운 실제 서버에 curl/Playwright로
   대체. 통합 테스트 자체는 CI 등 Docker 소켓이 정상 인식되는 환경에서
   마저 실행되어야 함
+  - **(2026-07-13 후속)** 근본 원인 규명 + 해결 완료(Docker Desktop
+    Engine API `MinAPIVersion` vs Testcontainers 1.20.4의 docker-java
+    버전 비호환, `testcontainers-bom` 1.21.4로 해결) - 아래 §10 및
+    2026-07-13 작업 기록 참고
 
 **다음 작업**
 - 여전히 미착수: 코스피·코스닥 국내지수(#1 나머지), 해외지수·VIX(#1),
@@ -1177,9 +1183,159 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   수정은 컴파일 검증 + 실제 CI 실행 결과로 검증. 같은 시기 다른
   세션도 독립적으로 동일 문제를 발견해 기록해둔 것을 확인(중복 조사
   아님)
+  - **(2026-07-13 후속)** 이 세션의 "버전 비호환" 추정이 실제로 맞았음이
+    확인됨(2026-07-13 세션에서 실측) - Docker Desktop Engine API의
+    `MinAPIVersion`이 올라가면서 Testcontainers 1.20.4가 번들한
+    docker-java 클라이언트가 그보다 낮은 버전으로 협상을 시도해 거부당한
+    것. `backend/build.gradle`의 `testcontainers-bom`을 1.21.4로 올려
+    해결. 상세는 `docs/DEVELOPMENT.md` §1 및 2026-07-13 작업 기록 참고
 
 **다음 작업**
 - 없음(이 세션 범위 내). 로컬 Testcontainers Docker 호환 문제는 앞선
   작업기록 항목에 이미 남아있어 중복 기록하지 않음
+
+</details>
+
+<details>
+<summary>2026-07-13 - 로컬 Testcontainers "Could not find a valid Docker environment" 근본 원인 규명 + 해결</summary>
+
+**변경 사항**
+- 이전 두 세션(2026-07-11 OAuth 세션, 2026-07-12 급등락 랭킹 세션)이
+  각각 "버전 비호환" 추정 / "원인 불명 환경 문제"로만 기록하고 넘어갔던
+  이슈를 실제로 진단: `docker`/`docker compose` CLI는 정상 동작하는데
+  Testcontainers 기반 통합 테스트(`ApiTestSupport` 하위 전체)만
+  클래스 로딩 시점에 "Could not find a valid Docker environment"로
+  실패하는 원인을 추적
+- **1차 진단(오판)**: `docker context ls`로 활성 컨텍스트가
+  `desktop-linux`(소켓 `~/.docker/run/docker.sock`)임을 확인했는데,
+  머신 전역 `~/.testcontainers.properties`에 2023-11-22자로 박제된
+  `docker.client.strategy=UnixSocketClientProviderStrategy` 핀이 있길래
+  이게 원인이라 판단해 백업 후 삭제. 그런데 **삭제 후 재실행해도 동일하게
+  재현**됨 - 1차 진단이 틀렸다는 뜻
+- **2차 진단(실제 원인)**: `--info` 옵션으로 Testcontainers가 시도한
+  전략들의 실패 사유를 직접 확인하니 `UnixSocketClientProviderStrategy`,
+  `DockerDesktopClientProviderStrategy` 둘 다 동일하게
+  `BadRequestException (Status 400: ...)`. `curl`로 소켓에 직접
+  질의해 재현: `~/.docker/run/docker.sock`은 버전 없는 `/info`엔 200을
+  주지만, `/v1.24/info`·`/v1.32/info`처럼 낮은 API 버전을 명시하면 400
+  (`/v1.40/info`부터 200). `docker version`으로 확인한 서버의
+  `MinAPIVersion`이 정확히 `1.40` - 즉 Testcontainers **1.20.4**가
+  번들한 docker-java 클라이언트가 전략 탐지 시 그보다 낮은 API 버전으로
+  하드코딩된 핑을 날려 최신 Docker Desktop 엔진에 거부당하는 게 진짜
+  원인이었음. `DOCKER_API_VERSION` 환경변수로 강제 협상도 시도했으나
+  효과 없음(전략 탐지 로직 자체가 버전을 하드코딩해 우회 불가)
+- **해결**: `backend/build.gradle`의 `testcontainers-bom`을 1.20.4 →
+  **1.21.4**로 업그레이드. `MarketControllerTest`/`PriceControllerTest`
+  둘 다 통과 확인 후, `./gradlew :api:test :core:test` 전체 스위트를
+  돌려 회귀 없음까지 확인
+- 리포지토리 안에는 `.testcontainers.properties`나 `DOCKER_HOST`/
+  `TESTCONTAINERS_*` 참조가 전혀 없음을 확인(Explore로 전체 검색) -
+  진짜 원인(라이브러리-엔진 버전 비호환)은 코드 쪽 문제였고, 머신 전역
+  핀 파일은 이번 실패와는 무관한 별개의(하지만 그 자체로는 유효한) 낡은
+  설정이었음
+- `docs/DEVELOPMENT.md` §1과 `CLAUDE.md` §10, 그리고 2026-07-11/
+  2026-07-12 작업 기록의 관련 문구를 전부 이 정확한 결론으로 갱신 -
+  1차 오판을 그대로 문서에 남겼다가 사용자에게 확인받아 정정한 과정까지
+  함께 기록(같은 실수 반복 방지)
+
+**변경 파일**
+- `backend/build.gradle` — `testcontainers-bom` 1.20.4 → 1.21.4
+- `~/.testcontainers.properties` — 삭제(백업 `~/.testcontainers.properties.bak`
+  보관). *리포 밖 머신 설정, 결과적으로 이번 실패의 원인은 아니었지만
+  낡은 설정이라 정리 겸 유지*
+- `docs/DEVELOPMENT.md` §1 — "Testcontainers가 ... 실패" 트러블슈팅
+  소절(정확한 원인/진단/해결 절차로 재작성)
+- `CLAUDE.md` §10, 2026-07-11/2026-07-12 작업 기록 — 근본 원인 포인터
+  정정
+
+**결정 사항**
+- 1차 진단이 틀렸음을 확인한 즉시 사용자에게 알리고, `build.gradle`
+  의존성 버전 변경(원래 승인 범위인 "로컬 설정+문서화"를 벗어나는 실제
+  코드 변경)에 대해 별도로 승인을 받은 뒤 진행 - 승인된 계획의 범위를
+  임의로 넘기지 않기 위함
+- `~/.testcontainers.properties`는 원인이 아니었다는 게 밝혀진 뒤에도
+  삭제 상태를 되돌리지 않음 - 낡은 설정 자체는 여전히 무의미하고,
+  삭제해도 부작용이 없으며 자동 감지 쪽이 더 유연함
+- 버전을 최신 메이저(2.0.x)가 아니라 같은 1.x 라인의 1.21.4로 올림 -
+  이번 문제(API 버전 협상)를 고치는 데는 충분했고, 메이저 업그레이드는
+  API 변경 여부를 더 넓게 검토해야 해 이번 스코프를 벗어난다고 판단
+
+**검증**
+- `./gradlew :api:test --tests 'com.quantlab.market.controller.
+  MarketControllerTest' --tests 'com.quantlab.price.controller.
+  PriceControllerTest'` - 11개 전부 통과(수정 전엔 11개 전부 실패)
+- `./gradlew :api:test :core:test` - 전체 스위트 회귀 없이 통과
+
+**다음 작업**
+- 없음(이 세션 범위 내)
+
+</details>
+
+<details>
+<summary>2026-07-13 - 전종목 랭킹 스케줄러 청크 딜레이 추가 (동반 429 방지)</summary>
+
+**변경 사항**
+- `MarketRankingScheduler`가 청크(200종목씩, 스윕당 최대 14개)를 딜레이
+  없이 연속 호출해, 스윕 하나가 순식간에 토스 `MARKET_DATA` 그룹의
+  초당 토큰 버킷(스펙 예시 10건/초)을 넘겨버리는 것을 실제 운영 로그로
+  확인. 같은 그룹을 공유하는 `PriceBroadcastScheduler`(관심종목 실시간
+  시세, 3초 주기) 요청까지 동반 429를 유발할 수 있는 문제였음
+- 청크 사이에 150ms 딜레이(`TOSS_API_DELAY_MS`)를 추가해 완화. 인터럽트
+  발생 시엔 스윕을 안전하게 중단(다음 5초 틱에 재시도)
+
+**변경 파일**
+- `backend/core/.../market/scheduler/MarketRankingScheduler.java` - 청크
+  간 `Thread.sleep(150)` 추가
+
+**검증**
+- `:core:test` 전체 스위트(105개) 통과 - 기존 `MarketRankingSchedulerTest`
+  회귀 없음
+
+</details>
+
+<details>
+<summary>2026-07-13 - 토스 API 토큰 401(invalid-token) 감지 시 캐시 무효화 + 재시도</summary>
+
+**변경 사항**
+- 백엔드 재기동 직후 `/api/market/indices` 등 토스 API 호출이 전부
+  401(`invalid-token`)로 반복 실패하는 것을 발견. Redis에 캐시된 토큰
+  TTL은 아직 21시간 넘게 남아있었는데도 토스 서버가 거부 - 토스 API는
+  계정당 토큰 1개만 유효해(재발급 시 이전 토큰 즉시 무효화, §4 참고)
+  다른 프로세스가 재발급받으면서 이 캐시가 TTL과 무관하게 조용히 죽은
+  상태였던 것으로 추정. `TossTokenManager.getAccessToken()`이 Redis
+  TTL만 믿고 캐시를 그대로 반환할 뿐, 401을 캐시 무효화 신호로 인식해
+  재발급하는 경로가 전혀 없었던 게 근본 원인
+- 즉시 조치로 Redis에 캐시된 죽은 토큰을 삭제해 재기동 후 정상화 확인
+- 근본 수정: `TossTokenManager.invalidateToken()` 신규 추가(Redis 키
+  삭제), `TossApiClient`에 `withTokenRetry` 헬퍼를 도입해 401
+  (`HttpClientErrorException.Unauthorized`)을 받으면 캐시를 지우고 새
+  토큰으로 1회만 재시도(그래도 실패하면 그대로 전파, 무한루프 방지).
+  429(Rate Limit) 경로는 기존 그대로 유지하고 토큰 무효화를 트리거하지
+  않도록 구분
+
+**변경 파일**
+- `backend/core/.../infra/toss/TossTokenManager.java` - `invalidateToken()` 추가
+- `backend/core/.../infra/toss/TossApiClient.java` - `withTokenRetry` 헬퍼로
+  4개 메서드(`getDailyCandles`/`getCurrentPrices`/`getExchangeRate`/
+  `getMarketCalendar`) 전부 401 감지 시 1회 재시도하도록 통일
+- `backend/core/src/test/java/com/quantlab/infra/toss/{TossApiClientTest,
+  TossTokenManagerTest}.java`(신규) - 401 재시도 성공/재시도도 실패/429는
+  무효화 안 함 3케이스 + 토큰 캐시 히트/미스/invalidateToken 3케이스
+
+**결정 사항**
+- 즉시 조치(Redis 캐시 삭제)와 근본 수정을 분리해 순서대로 진행 -
+  캐시 삭제만으로도 당장 정상화되지만, 근본 원인(다른 프로세스의
+  재발급이 언제든 재발할 수 있는 구조)을 그대로 두면 같은 장애가
+  반복될 것이라 판단해 사용자 승인 하에 코드 수정까지 진행
+- 401 감지를 여러 클라이언트가 공유하는 `ExternalApiInvoker`가 아니라
+  `TossApiClient` 자체에 국한 - 공용 유틸을 건드리면 KIND/Upbit/퀀트엔진
+  클라이언트 등 무관한 호출부까지 영향 범위가 넓어져, 이번 문제(토스
+  토큰 단일 유효성)에 한정된 최소 침습 변경을 택함
+
+**검증**
+- 신규 유닛 테스트 6개 전부 통과, `:core:test`/`:api:test` 전체
+  스위트(128개) 회귀 없이 통과
+- 실제 `bootRun`으로 재기동 후 `curl /api/market/indices` 200 정상
+  응답, 로그에 에러 없음 확인
 
 </details>
