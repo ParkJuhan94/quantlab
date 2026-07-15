@@ -229,8 +229,12 @@ quantlab/
     주지 않고, 이를 얻으려면 더 빡빡한 레이트리밋 그룹(`MARKET_DATA_CHART`)의
     캔들 API를 매 틱마다 추가 호출해야 해 실익 대비 비용이 큼(v1 스코프 제외)
 - 토스증권 API가 아직 WebSocket을 지원하지 않아(§4) Spring이 REST
-  현재가를 폴링(기본 3초, `REALTIME_PRICE_POLL_INTERVAL_MS`로 조정)해
-  STOMP로 브로드캐스트하는 변환 계층으로 구현(`PriceBroadcastScheduler`)
+  현재가를 폴링해 STOMP로 브로드캐스트하는 변환 계층으로 구현. 전종목
+  폴링·Redis 적재는 `MarketPriceSweepScheduler`(기본 100ms,
+  `MARKET_RANKING_POLL_INTERVAL_MS`) 하나가 전담하고, `WatchlistPriceRelayScheduler`
+  (기본 3초, `REALTIME_PRICE_POLL_INTERVAL_MS`)는 Toss를 직접 부르지 않고
+  그 Redis 스냅샷을 관심종목만 골라 중계한다(2026-07-15/16 재설계 - 이전엔
+  두 스케줄러가 각각 Toss를 호출해 관심종목 가격이 중복 조회됐음)
 
 ### Python 퀀트 엔진
 | Method | URI | 설명 |
@@ -644,7 +648,7 @@ com.quantlab/{feature}/
 - OHLCV 수집 배치는 장 마감(15:30) 이후에만 실행
 - 토스증권 API Rate Limit은 **초당 토큰 버킷** 방식 (일일 쿼터 없음, `X-RateLimit-Limit`은 초당 burst capacity, 매초 토큰 리필). `MARKET_DATA_CHART` 그룹 초당 한도(스펙 예시 10건) 기준 150ms 딜레이 유지. 429 시 `RATE_LIMIT_EXCEEDED`로 감지해 수 초 백오프 후 재시도(`X-RateLimit-Reset`/`Retry-After` 헤더 참고)
 - `*Repository extends JpaRepository<...>, *QueryRepository`(QueryDSL 커스텀 조합) 패턴에서, 커스텀 `*QueryRepositoryImpl`은 `@Repository`가 붙어 있어 JPA가 자동 구성하는 리포지토리 프록시와 별개로 그 자체로도 스프링 빈이 된다. 따라서 다른 클래스에서 주입받을 땐 반드시 조합된 구체 타입(`ScoreRepository`, `DailyPriceRepository` 등)을 쓸 것 - `*QueryRepository` 인터페이스를 직접 주입하면 "빈 2개 발견" 에러가 난다
-- `TestContainerSupport`는 MySQL과 Redis 둘 다 Testcontainers로 격리한다(2026-07-13 세션에서 Redis 추가 - 이전엔 로컬 실제 Redis를 공유해 `bootRun` 잔여 캐시가 테스트에 섞이는 문제가 있었음). 다만 `@EnableScheduling`이 테스트 프로파일에서도 켜져 있어 `PriceBroadcastScheduler` 등 백그라운드 스케줄러가 같은 컨테이너에 비동기로 값을 채울 수 있다 - 캐시 미스/특정 상태를 결정적으로 검증해야 하는 테스트(`PriceControllerTest` 등)는 여전히 관련 캐시/스토어 클래스를 `@MockBean`으로 스텁할 것
+- `TestContainerSupport`는 MySQL과 Redis 둘 다 Testcontainers로 격리한다(2026-07-13 세션에서 Redis 추가 - 이전엔 로컬 실제 Redis를 공유해 `bootRun` 잔여 캐시가 테스트에 섞이는 문제가 있었음). 다만 `@EnableScheduling`이 테스트 프로파일에서도 켜져 있어 `MarketPriceSweepScheduler`/`WatchlistPriceRelayScheduler` 등 백그라운드 스케줄러가 같은 컨테이너에 비동기로 값을 채울 수 있다 - 캐시 미스/특정 상태를 결정적으로 검증해야 하는 테스트(`PriceControllerTest` 등)는 여전히 관련 캐시/스토어 클래스를 `@MockBean`으로 스텁할 것
 - 로컬에서 Testcontainers 통합 테스트가 "Could not find a valid Docker environment"로 실패했던 이슈는 2026-07-13 세션에서 근본 원인 규명 + 해결 완료(최신 Docker Desktop의 Engine API `MinAPIVersion`과 Testcontainers 1.20.4가 번들한 docker-java 클라이언트 간 버전 비호환 - `backend/build.gradle`의 `testcontainers-bom`을 1.21.4로 올려 해결, 여러 세션에 걸쳐 "원인 불명 환경 문제"/"버전 비호환 추정"으로만 남아있던 이슈). 같은 증상이 Docker Desktop 업데이트 후 재발하면 `docs/DEVELOPMENT.md` §1 "Testcontainers가 ... 실패" 참고(머신 전역 `~/.testcontainers.properties` 핀은 처음엔 원인으로 오판했던 별개 항목이니 혼동 주의)
 - Vite는 webpack과 달리 Node.js 전역을 자동 폴리필하지 않는다. `sockjs-client`처럼 `global`을 참조하는 라이브러리를 그대로 번들하면 브라우저에서 "global is not defined"로 페이지 전체가 깨진다 - `frontend/vite.config.ts`에 `define: { global: 'globalThis' }` 필요(이 문제는 해당 라이브러리를 실제로 번들에 포함시키는 순간에만 드러나므로, import만 추가하고 아직 렌더 경로에 안 걸린 코드에서는 안 잡힐 수 있음에 주의)
 - SockJS 클라이언트의 XHR 폴백 트랜스포트(`/ws/stocks/info` 핸드셰이크 등)는 기본적으로 `withCredentials: true`로 요청한다. REST API 인증 자체는 쿠키가 아니라 `Authorization` 헤더를 쓰더라도, 백엔드 CORS 설정에 `allowCredentials(true)`가 없으면 오리진이 일치해도 브라우저가 응답을 차단한다(`backend/api/.../auth/config/SecurityConfig.java`). 허용 오리진을 특정 값 하나로 고정해뒀다면(와일드카드 아님) 안전하게 켤 수 있다
@@ -1337,5 +1341,87 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
   스위트(128개) 회귀 없이 통과
 - 실제 `bootRun`으로 재기동 후 `curl /api/market/indices` 200 정상
   응답, 로그에 에러 없음 확인
+
+</details>
+
+<details>
+<summary>2026-07-16 - Toss MARKET_DATA 레이트리밋 아키텍처 재설계 + 스케줄러/DTO 네이밍 정리</summary>
+
+**변경 사항**
+- **(핵심) 전종목 랭킹과 관심종목 실시간 시세가 각각 독립적으로 Toss를
+  호출해 같은 종목 가격을 중복 조회하던 구조를, 한 스케줄러만 Toss를
+  부르는 단일 파이프라인으로 재설계.** 발단은 실서버 로그에 뜬
+  "토스증권 API 요청 한도를 초과했습니다" WARN - 원인은 전종목(~2,700개,
+  14청크) 스윕을 딜레이 없이 연속 호출해 초당 토큰 버킷(스펙 예시
+  10건/초)을 순식간에 넘긴 것이었음(1차 조치: 청크 사이 150ms 딜레이,
+  커밋 `1fe940f`). 이어서 "관심종목 스케줄러도 Toss를 부르는데 두
+  스케줄러가 중복 호출 아니냐"는 질문을 계기로 구조 자체를 재설계:
+  이제 `MarketPriceSweepScheduler`(구 `MarketRankingScheduler`)가
+  전종목 시세를 Redis(`PriceCacheStore`)에 전부 적재하는 유일한
+  조회원이 되고, `WatchlistPriceRelayScheduler`(구
+  `PriceBroadcastScheduler`)는 Toss를 전혀 호출하지 않고 그 Redis
+  스냅샷을 관심종목만 골라 STOMP로 중계만 함. 청크 딜레이는
+  120ms(PriceBroadcastScheduler 몫 + 네트워크 최악의 경우 0ms를
+  가정해도 초당 10건 한도에 여유가 남도록 계산), 스케줄러 자체
+  주기는 100ms로 낮춤 - `@Scheduled(fixedDelay=...)`는 이전 실행
+  종료 후 대기이므로 겹칠 위험이 없고, 실제 페이싱은 청크 내부
+  딜레이가 전담하기 때문에 바깥 주기를 낮추는 것 자체는 안전하다는
+  점을 사용자와 함께 계산으로 확인
+- 재설계 후 통합 테스트를 실제로 돌려보다가 `MarketCalendarCache`의
+  null 체크 누락(기존부터 있던 버그, 스케줄러가 100ms로 빨라지면서
+  테스트 컨텍스트 기동 직후 처음으로 실제 노출됨)을 발견해 방어 코드
+  + 테스트 추가. 조사 결과 `ExternalApiInvoker`가 실제 HTTP 실패는
+  이미 예외로 감싸주므로 이 null 케이스 자체는 프로덕션에서는 발생
+  불가능한 테스트 전용 아티팩트였음(다만 진짜 Toss 장애 시 재시도에
+  백오프가 없다는 점은 별개 리스크로 남겨둠 - 사용자가 속도를
+  우선하기로 결정)
+- **스케줄러/DTO 네이밍 정리**: 역할이 바뀐 김에 이름도 정리.
+  `MarketRankingScheduler`→`MarketPriceSweepScheduler`(이제 랭킹은
+  부산물이고 전종목 스윕이 본질), `PriceBroadcastScheduler`→
+  `WatchlistPriceRelayScheduler`(직접 조회가 아니라 캐시 중계만
+  한다는 걸 명시), `PriceBroadcastMessage`→`PriceSnapshot`(브로드캐스트
+  전용 메시지가 아니라 전종목 캐시 값 본체가 됐으므로). 이 과정에서
+  나온 대안들(DTO를 `PriceCache`로, 캐시 매니저들을 `*Service`로)은
+  둘 다 기각 - `PriceCache`는 기존 `PriceCacheStore`와, `*Service`는
+  이미 그 캐시들을 조합해 쓰는 `MarketIndexService`/`MarketRankingService`와
+  실제로 이름이 충돌해 채택 불가함을 코드로 직접 확인 후 근거로 제시
+
+**변경 파일**
+- `backend/core/.../market/scheduler/MarketPriceSweepScheduler.java`(구
+  `MarketRankingScheduler`) - 전종목 조회 + Redis 적재 + 랭킹 계산
+- `backend/core/.../price/scheduler/WatchlistPriceRelayScheduler.java`(구
+  `PriceBroadcastScheduler`) - Toss 의존성 전부 제거, Redis 읽기 전용으로 축소
+- `backend/core/.../price/dto/response/PriceSnapshot.java`(구
+  `PriceBroadcastMessage`) + 참조 9개 파일(`PriceCacheStore`,
+  `PriceMapper`, `StockPriceService` 등)
+- `backend/core/.../price/cache/MarketCalendarCache.java` - null 응답 방어
+- `backend/api/src/main/resources/application.yml` - `market-ranking.poll-interval-ms`
+  5000→100
+- 테스트: `MarketPriceSweepSchedulerTest`, `WatchlistPriceRelaySchedulerTest`,
+  `MarketCalendarCacheTest`(null 케이스 추가) 등
+- `docs/ROADMAP.md`, `CLAUDE.md` §6/§10 - 새 이름/새 아키텍처로 갱신
+
+**결정 사항**
+- 레이트리밋 여유 계산은 항상 "네트워크 지연 0ms"를 가정 - 실측
+  네트워크 왕복시간이 주는 여유를 안전마진으로 잡으면, 애초에 이번
+  429를 유발했던 "네트워크가 알아서 페이싱해줄 것"이라는 가정과 같은
+  함정이라 판단해 배제
+- `PriceCacheStore`, `PriceCacheStore`가 쓰는 read-through 캐시 패턴
+  자체는 이번 리네이밍 대상에서 제외(사용자가 유지 결정) - "Cache"
+  접미사가 이 코드베이스에서는 TTL 매니저 클래스를 가리키는 일관된
+  관례임을 다른 6개 클래스로 확인했기 때문
+
+**검증**
+- `:core:test`, `:api:test`(통합 테스트 `PriceControllerTest`/
+  `WatchlistControllerTest`/`MarketControllerTest` 포함) 전체 스위트
+  재설계 전/후, 리네이밍 전/후 각각 재실행해 전부 통과 확인
+
+**다음 작업**
+- 진짜 Toss 장애(예외) 시 `MarketCalendarCache`의 재시도에 백오프가
+  없는 점은 알고 있는 채로 남겨둠(사용자가 100ms 유지를 선택) - 재발
+  시 백오프 추가 검토
+- 로그 관리 시스템(Loki+Grafana vs ELK)은 이번 세션에서 논의만 하고
+  착수 전 단계에서 레이트리밋 문제로 우선순위가 밀림 - 다음 세션에서
+  재논의 필요
 
 </details>

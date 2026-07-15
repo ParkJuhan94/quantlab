@@ -18,7 +18,7 @@
 - `infra/kind/` (Client/Config/Properties/dto/exception 5파일) — 비-토스 외부소스 스크래핑/조회 템플릿. jsoup 존재
 - `infra/toss/` — RestClient 빈 + `@ConfigurationProperties` 와이어링, rate-limit 특수매핑
 - `infra/python/PythonEngineClient.java` + `quant-engine/` — Python 컴퓨트 잡 추가 템플릿
-- 스케줄러 3종: `OhlcvCollectorScheduler`(전종목 배치+페이싱+백오프), `PriceBroadcastScheduler`(폴링→STOMP), `StockMasterSyncScheduler`(주간 배치)
+- 스케줄러 3종: `OhlcvCollectorScheduler`(전종목 배치+페이싱+백오프), `WatchlistPriceRelayScheduler`(Redis→STOMP 중계), `StockMasterSyncScheduler`(주간 배치)
 - **`quant-engine/calculator/commentary.py`** — 이미 Anthropic `claude-haiku-4-5` 연동 + 규칙기반 폴백 구현됨 (AI 요약 절반 존재)
 
 ### 토스 스펙 확정 사실 (랭킹 난이도를 가르는 근거)
@@ -38,7 +38,7 @@
 | 1 | 1 | 환율·비트코인 위젯 | ✅ **완료**(2026-07-12) | 하 | `TossApiClient.getExchangeRate` + `infra/upbit/` |
 | 2 | 5 | 호가/체결/상하한가/매수유의/해외장운영 | 미착수 | 하 | 토스 API에 이미 존재, 클라이언트 메서드 추가만 |
 | 3 | 7 | 의견 피드백 모달 | 미착수 | 하 | 순수 자체 구현, `Feedback` 엔티티 하나 + 등록 API |
-| 4 | 2a | 급등락(등락률) 실시간 전종목 랭킹 | ✅ **완료**(2026-07-12) | 중 | `MarketRankingScheduler`(5초 주기) |
+| 4 | 2a | 급등락(등락률) 실시간 전종목 랭킹 | ✅ **완료**(2026-07-12) | 중 | `MarketPriceSweepScheduler`(100ms 주기) |
 | 5 | 2b | 거래대금/거래량 랭킹 (일배치) | 미착수 | 중 | KRX/네이버 일별 데이터 스크래핑 → 장마감 후 1배치 |
 | 6 | 1 | 코스피·코스닥 국내지수 | 미착수 | 중 | 토스에 지수 심볼 없음 → 네이버금융 비공식 or KRX 스크래핑 |
 | 7 | 1 | 해외지수·VIX | 미착수 | 중 | 외부 API 신규 연동(Finnhub 등) |
@@ -64,7 +64,7 @@
 
 **2a. 급등락(등락률) 실시간 랭킹 — 중 (가능)**
 - 등락률 = 현재가 vs 전일종가. `prices`가 벌크(200종목/호출) → 전종목 2,706개 = 14호출/스윕. 초당 10건이면 1스윕 ≈ 1.4초 → 3~5초 주기 갱신 = 사실상 실시간.
-- 전일종가 2,706개는 장 시작 전 하루 1회만 확보(틱당 비용 아님). `PriceBroadcastScheduler` 패턴 확장.
+- 전일종가 2,706개는 장 시작 전 하루 1회만 확보(틱당 비용 아님). `WatchlistPriceRelayScheduler`(당시 `PriceBroadcastScheduler`) 패턴 확장.
 
 **2b. 거래대금/거래량 랭킹 (일배치) — 중 (가능)**
 - 장마감 후 KRX/네이버 전종목 일별 시세 1회 스크래핑 → 랭킹 저장 → 조회 API. HTS도 "어제 기준"이라 일배치로 충분. `infra/kind`+`OhlcvCollectorScheduler` 템플릿.
@@ -105,11 +105,15 @@
   지수(코스피/코스닥/나스닥/S&P500/필라델피아반도체)는 여전히 예시 데이터 - 캡션에
   "환율·비트코인은 실시간, 나머지는 예시 데이터"로 명시.
 
-### ✅ 급등락(등락률) 실시간 전종목 랭킹 (2026-07-12 완료)
-- `MarketRankingScheduler`가 `PriceBroadcastScheduler`와 동일한 `MARKET_DATA` Rate
-  Limit 예산을 나눠 쓰므로 기본 주기를 5초로 분리(`market-ranking.poll-interval-ms`).
-  전 상장 종목(`AllListedStockCache`, 10분 TTL)을 200개씩 청크로 조회해 등락률을
-  계산하고 `MarketRankingCache`(메모리, Redis 아님)에 적재.
+### ✅ 급등락(등락률) 실시간 전종목 랭킹 (2026-07-12 완료, 2026-07-15/16 재설계)
+- `MarketPriceSweepScheduler`(구 `MarketRankingScheduler`)가 전 상장 종목
+  (`AllListedStockCache`, 10분 TTL)을 200개씩 청크로 조회해 등락률을 계산하고
+  `MarketRankingCache`(메모리, Redis 아님)에 적재하는 동시에, 심볼별 시세를
+  `PriceCacheStore`(Redis)에도 적재하는 유일한 가격 조회 파이프라인이 됐다 -
+  원래는 관심종목용 스케줄러가 별도로 Toss를 호출해 관심종목이면서 전종목이기도
+  한 종목이 중복 조회되던 걸, 이 스케줄러 하나로 통합(`WatchlistPriceRelayScheduler`,
+  구 `PriceBroadcastScheduler`는 이제 Toss를 호출하지 않고 이 Redis 캐시만 읽어
+  STOMP로 중계). 청크 딜레이 120ms, 기본 주기 100ms(`market-ranking.poll-interval-ms`).
 - 청크 하나가 429 등으로 실패해도 그 청크만 스킵하고 다음 틱에 재시도 - 전체 스윕을
   막지 않음.
 - `GET /api/market/ranking?sort=gainers|losers&limit=`로 조회. 거래대금/거래량은
