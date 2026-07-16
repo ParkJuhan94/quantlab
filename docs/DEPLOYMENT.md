@@ -345,3 +345,58 @@ docker pull ghcr.io/parkjuhan94/quantlab-backend:<sha>
 docker tag ghcr.io/parkjuhan94/quantlab-backend:<sha> ghcr.io/parkjuhan94/quantlab-backend:latest
 docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml --env-file .env.prod up -d backend
 ```
+
+## 13. 모니터링 스택 (Prometheus / Grafana / Alertmanager, Phase 1)
+
+§6~§8의 CloudWatch 기반 구성(로그/헬스체크/리소스 3개 지표)과 별개로,
+**앱 내부 지표**(JVM, HTTP 요청률/지연/에러율, Toss API 429 발생률, 전종목
+시세 스윕 소요시간, 퀀트 엔진 호출 실패율 등)를 보기 위한 self-host
+관측성 스택이다. `docker-compose.monitoring.yml`이 오버레이로 분리돼
+있고, `docker-compose.cloudwatch.yml`과 달리 **AWS 자격증명이 필요 없어
+로컬에서도 그대로 기동해 검증할 수 있다**(`docs/DEVELOPMENT.md` 참고).
+
+구성 요소: Prometheus(지표 수집·저장, 15일 보존), Alertmanager(Slack
+알림 라우팅), Grafana(대시보드 3종 - JVM/Spring HTTP/QuantLab 비즈니스
+지표, `monitoring/grafana/` 프로비저닝으로 최초 기동 시 자동 로드),
+node-exporter(호스트 리소스), cAdvisor(컨테이너별 리소스). 백엔드는
+`spring-boot-starter-actuator` + Micrometer로 `/actuator/prometheus`를
+노출하고(`backend/api/build.gradle`), quant-engine은
+`prometheus-fastapi-instrumentator`로 `/metrics`를 노출한다
+(`quant-engine/main.py`).
+
+1. `.env.prod`에 아래 두 값을 채운다(`.env.prod.example` 참고):
+   - `GRAFANA_ADMIN_PASSWORD` — Grafana 초기 관리자 비밀번호
+   - `SLACK_ALERT_WEBHOOK_URL` — 알림 전용 Slack Incoming Webhook URL.
+     **기존 `SLACK_FEEDBACK_WEBHOOK_URL`(사용자 피드백)과 다른 채널로
+     새로 발급받을 것을 권장** - 인프라 알람과 사용자 피드백이 같은
+     채널에 섞이면 노이즈가 커진다.
+2. §4의 기동 명령에 `docker-compose.monitoring.yml`을 오버레이로 추가한다
+   (다른 오버레이와 함께 여러 개를 동시에 지정할 수 있다):
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml \
+     -f docker-compose.monitoring.yml --env-file .env.prod up -d --build
+   ```
+3. **Prometheus/Grafana/Alertmanager UI는 외부에 노출하지 않는다**
+   (`docker-compose.monitoring.yml`이 호스트 포트를 열긴 하지만, 보안
+   그룹에서 9090/9093/3002를 열어두지 말 것 - 22/80/443만 인바운드
+   허용하는 §1 설정을 그대로 유지). 대신 SSH 터널로 접근한다:
+   ```bash
+   ssh -L 3002:localhost:3002 -L 9090:localhost:9090 -L 9093:localhost:9093 \
+     ubuntu@<EC2_HOST>
+   # 이후 로컬 브라우저에서 http://localhost:3002 (Grafana),
+   # http://localhost:9090 (Prometheus), http://localhost:9093 (Alertmanager)
+   ```
+4. Grafana 접속 후 좌측 `Dashboards → QuantLab` 폴더에 3개 대시보드가
+   프로비저닝돼 있는지 확인(JVM, Spring Boot HTTP, 비즈니스 지표).
+   데이터소스(Prometheus)도 프로비저닝으로 자동 등록된다 - 수동 설정 불필요.
+5. 알림 규칙은 `monitoring/prometheus/rules/alerts.yml`에 코드로 관리한다
+   (BackendDown, QuantEngineDown, HighHttp5xxRate, TossRateLimitSpike,
+   QuantEngineFailureRate, JvmHeapHigh, HostMemoryHigh, HostDiskHigh).
+   Alertmanager UI(`http://localhost:9093`, 터널 경유)에서 발화 중인
+   알림/Silence 상태를 확인할 수 있다.
+6. 리소스 영향: 이 스택은 EC2에 **약 1GB의 추가 RAM**을 요구한다(Prometheus
+   +Grafana+Alertmanager+node-exporter+cAdvisor 합산). §1에서 t3.small을
+   권장했는데, 이 스택까지 상시 가동하려면 **t3.medium 이상으로 승격을
+   권장**한다. 로컬 검증에는 이 제약이 적용되지 않는다.
+7. Phase 2(로그, Loki)·Phase 3(트레이스, Tempo)는 아직 미착수 - CLAUDE.md
+   작업 기록 참고.

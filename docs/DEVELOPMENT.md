@@ -215,6 +215,35 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml \
 # 맞게 갈렸는지(/quantlab/backend 등) 확인
 ```
 
+### 모니터링 오버레이는 로컬에서도 실제 기동 가능
+
+`docker-compose.monitoring.yml`(Prometheus/Grafana/Alertmanager/
+node-exporter/cAdvisor, `docs/DEPLOYMENT.md` §13)은 `docker-compose.
+cloudwatch.yml`과 달리 AWS 자격증명이 전혀 필요 없어 로컬에서 전체
+스택을 그대로 기동해 검증할 수 있다:
+
+```bash
+cp .env.prod.example .env.prod
+docker compose -f docker-compose.prod.yml -f docker-compose.monitoring.yml \
+  --env-file .env.prod up -d --build
+
+curl -s localhost:8080/actuator/prometheus | head       # 백엔드 지표 노출 확인(포트가 열려 있다면)
+curl -s localhost:9090/-/healthy                          # Prometheus
+curl -s localhost:9090/api/v1/targets | grep '"health"'   # 전 타깃 up 확인
+curl -s localhost:3002/api/health                          # Grafana (호스트 포트 3002)
+
+docker compose -f docker-compose.prod.yml -f docker-compose.monitoring.yml \
+  --env-file .env.prod down
+rm .env.prod
+```
+
+Alertmanager 설정(`monitoring/alertmanager/alertmanager.yml`)은 `${VAR}`
+치환을 지원하지 않아 entrypoint가 sed로 플레이스홀더
+(`__SLACK_ALERT_WEBHOOK_URL__`)를 실제 값으로 치환한 사본을 만들어
+기동한다 - 로그에 `"Completed loading of configuration file"`이 찍히면
+정상, `"unsupported scheme"` 에러가 보이면 `SLACK_ALERT_WEBHOOK_URL`
+값이 실제 URL 형식(`https://hooks.slack.com/...`)이 아니라는 뜻이다.
+
 ### 신규 셸 스크립트는 문법 검사까지만
 
 `scripts/*.sh`(모니터링 지표 전송, MySQL 백업, cron 등록)는 EC2 호스트

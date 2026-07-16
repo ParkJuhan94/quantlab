@@ -692,6 +692,11 @@ docker compose -f docker-compose.prod.yml build
 
 # 배포 오버레이 머지 결과만 확인(컨테이너 기동 없이)
 docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml config
+
+# 모니터링 스택(Prometheus/Grafana/Alertmanager) 로컬 기동 - AWS 자격증명
+# 불필요, cloudwatch 오버레이와 달리 실제로 up까지 검증 가능
+# (docs/DEVELOPMENT.md, docs/DEPLOYMENT.md §13 참고)
+docker compose -f docker-compose.prod.yml -f docker-compose.monitoring.yml --env-file .env.prod up -d
 ```
 
 ---
@@ -1423,5 +1428,125 @@ docker compose -f docker-compose.prod.yml -f docker-compose.cloudwatch.yml confi
 - 로그 관리 시스템(Loki+Grafana vs ELK)은 이번 세션에서 논의만 하고
   착수 전 단계에서 레이트리밋 문제로 우선순위가 밀림 - 다음 세션에서
   재논의 필요
+
+</details>
+
+<details>
+<summary>2026-07-16 - 관측성 스택 신설(Prometheus/Grafana/Alertmanager, Phase 1: 메트릭+대시보드+알림)</summary>
+
+**변경 사항**
+- 지금까지 QuantLab의 관측성은 호스트 레벨(얕은 `/api/health`, cron이
+  CloudWatch로 보내는 헬스/메모리/디스크 3개 지표)뿐이었고 **앱 내부는
+  완전히 깜깜했음** - Actuator/Micrometer가 전무해 JVM 상태, HTTP
+  지연/에러율은 물론, 바로 하루 전(2026-07-15/16) 재설계한 Toss
+  `MARKET_DATA` 429 레이트리밋이 지금 실제로 얼마나 발생하는지조차 숫자로
+  볼 수단이 없었음. "실제 운영 가능 + 포트폴리오 어필"을 목표로 현업
+  표준 self-host 관측성 스택(Prometheus+Grafana+Alertmanager, PLG 계열의
+  메트릭 축)을 Phase 1 범위(메트릭+대시보드+알림까지)로 구축
+  - ELK(Elasticsearch/Kibana)와 Loki 중 로그 스택을 저울질하는 논의를
+    거쳐(이번 Phase 1엔 로그 자체가 범위 밖이라 결론은 Phase 2로 유보)
+    Loki 쪽으로 기울었음 - 메트릭 백본이 Prometheus로 고정되면 Grafana
+    단일 UI로 통합되는 Loki가 자연스럽고, ELK/OpenSearch는 t3.small에
+    올리기엔 무겁고(JVM 기반, 최소 수백MB~2GB 힙 권장) AWS 매니지드로도
+    무료 티어가 사실상 없어 이 프로젝트 규모엔 과함
+  - 로그(Loki)·트레이스(Tempo)는 Phase 2/3로 명시적으로 미룸 - 사용자가
+    "메트릭 우선(단계적)"으로 확정, 이번 세션은 Phase 1만
+- **앱 계측**: `backend/api`에 `spring-boot-starter-actuator` +
+  `micrometer-registry-prometheus`, `backend/core`에 `micrometer-core`
+  추가. `/actuator/prometheus`만 노출(그 외 엔드포인트는 닫음),
+  `SecurityConfig`에 `/actuator/**` permitAll 추가 - nginx가 이 경로를
+  프록시하지 않아(`frontend/nginx.conf`) 외부에서는 애초에 도달 불가,
+  Prometheus만 docker 내부망에서 스크랩
+  - 이 프로젝트만의 비즈니스 지표를 처음부터 계측(범용 JVM/HTTP 지표만
+    붙이고 끝내지 않음): `TossApiClient`에 endpoint/outcome 태그가 붙은
+    호출 Timer+Counter(429/401 감지가 핵심 - `TossRateLimitSpike` 알림의
+    근거), `MarketPriceSweepScheduler`에 전종목 스윕 소요시간 Timer +
+    청크 스킵 Counter, `PythonEngineClient`/`ScoreService`에 퀀트 엔진
+    호출 Timer/실패 Counter + 응답 누락 종목 Counter
+  - `ExternalApiInvoker`(static 유틸)는 `MeterRegistry`를 생성자로 주입받을
+    수 없어 계측 지점을 호출부 빈(TossApiClient 등) 각각으로 선택 -
+    공용 유틸을 억지로 인스턴스화하기보다 호출부에서 Timer.Sample로
+    감싸는 편이 침습이 적음
+  - `http.server.requests`에만 퍼센타일 히스토그램을 켜서(`management.
+    metrics.distribution.percentiles-histogram`) Grafana에서 p95/p99
+    지연 패널이 가능하게 함 - 커스텀 Timer(Toss/퀀트엔진)는 카디널리티
+    낮고 평균 지연이면 충분해 히스토그램은 켜지 않음(전역으로 켜면
+    태그 조합만큼 시계열이 폭증)
+  - quant-engine(FastAPI)에는 `prometheus-fastapi-instrumentator`로
+    `/metrics` 노출 - 요청량이 배치 위주라 커스텀 지표 없이 기본 HTTP
+    계측만 적용
+- **모니터링 스택**: `docker-compose.monitoring.yml` 신규(기존
+  `docker-compose.cloudwatch.yml` 분리 패턴을 그대로 미러링) - Prometheus,
+  Alertmanager, node-exporter, cAdvisor, Grafana(대시보드 3종: JVM,
+  Spring Boot HTTP, QuantLab 비즈니스 지표 - `monitoring/grafana/`에
+  프로비저닝 JSON으로 커밋해 최초 기동 시 자동 로드). cloudwatch
+  오버레이와의 결정적 차이: **AWS 자격증명이 필요 없어 로컬에서도 실제
+  `up`까지 기동·검증 가능**(로컬 Grafana 3000/프론트 3001과 안 겹치게
+  Grafana만 3002로 매핑)
+  - 알림 규칙은 `monitoring/prometheus/rules/alerts.yml`에 코드로:
+    BackendDown/QuantEngineDown/HighHttp5xxRate/TossRateLimitSpike/
+    QuantEngineFailureRate/JvmHeapHigh/HostMemoryHigh/HostDiskHigh 8종
+  - Alertmanager → Slack `#quantlab-alerts`(기존 사용자 피드백용 Incoming
+    Webhook과 별개 채널로 분리 등록 권장, `.env.prod.example`의
+    `SLACK_ALERT_WEBHOOK_URL`)
+- **버그 발견 + 수정(로컬 실제 기동 검증 중)**: Alertmanager 설정 파일은
+  `${VAR}` 환경변수 치환을 지원하지 않는다. 이를 우회하려고 entrypoint에서
+  sed로 치환하는 방식을 짰는데, 최초 구현(`${SLACK_ALERT_WEBHOOK_URL}`을
+  치환 대상 플레이스홀더로 사용)이 실제로는 **docker compose 자신의
+  `${VAR}` 보간과 충돌**해 sed 명령의 검색 패턴 자체가 실제 시크릿 값으로
+  미리 치환돼버리는 버그를 발견 - `docker compose config`로 렌더링 결과를
+  직접 눈으로 확인하지 않았다면 그냥 "동작하는 줄 알고" 넘어갔을 문제.
+  실제로 컨테이너를 띄워보니 Alertmanager가 `"unsupported scheme"` 에러로
+  기동 실패. 플레이스홀더를 `$` 문자가 아예 없는
+  `__SLACK_ALERT_WEBHOOK_URL__`로 바꿔 compose 보간 대상 자체가 되지
+  않게 해 해결(재기동 후 로그에 `"Completed loading of configuration
+  file"` 확인)
+
+**변경 파일**
+- `backend/api/build.gradle`, `backend/core/build.gradle` - actuator/
+  micrometer 의존성
+- `backend/api/src/main/resources/application.yml` - `management.*` 블록
+- `backend/api/.../auth/config/SecurityConfig.java` - `/actuator/**` permitAll
+- `backend/core/.../infra/toss/TossApiClient.java`,
+  `market/scheduler/MarketPriceSweepScheduler.java`,
+  `infra/python/PythonEngineClient.java`, `score/service/ScoreService.java`
+  - 커스텀 Micrometer 계측 + 관련 테스트(`TossApiClientTest`,
+  `MarketPriceSweepSchedulerTest`, `ScoreServiceTest`)에 `SimpleMeterRegistry`
+  주입 추가
+- `quant-engine/main.py`, `quant-engine/requirements.txt` - `/metrics` 노출
+- `docker-compose.monitoring.yml`(신규), `.env.prod.example` -
+  `GRAFANA_ADMIN_PASSWORD`/`SLACK_ALERT_WEBHOOK_URL` 추가
+- `monitoring/`(신규 디렉터리) - `prometheus/{prometheus.yml,rules/alerts.yml}`,
+  `alertmanager/alertmanager.yml`, `grafana/provisioning/{datasources,
+  dashboards}/*.yml`, `grafana/dashboards/*.json`(JVM/Spring HTTP/비즈니스)
+- `docs/DEPLOYMENT.md` §13(신규), `docs/DEVELOPMENT.md`(모니터링 로컬
+  기동 절), `CLAUDE.md` §11 - 문서
+
+**결정 사항**
+- Phase 1을 "메트릭+대시보드+알림까지 완결"로 정의하고 로그/트레이스는
+  의도적으로 다음 세션으로 미룸 - 한 세션에 3-pillar를 전부 넣기보다
+  단계마다 실제로 동작하는 상태를 만들어두는 편을 택함
+- 호스트 메모리/디스크 알림이 기존 CloudWatch SNS 알람과 개념이
+  겹치지만 굳이 걷어내지 않음 - Slack 단일 창으로 보고 싶을 때와
+  AWS 콘솔로 보고 싶을 때 둘 다 남겨두는 것이 비용 대비 해가 없다고
+  판단(중복 알림이 거슬리면 둘 중 하나만 유지하면 됨)
+- Grafana/Prometheus/Alertmanager UI는 EC2에서 외부 노출하지 않고 SSH
+  터널로만 접근하도록 문서화 - 별도 인증 계층을 새로 설계하기보다
+  기존에 이미 확립된 "22번 포트 SSH 접근" 신뢰 경계를 재사용하는 편이
+  이번 스코프에 맞는 최소 구현
+
+**검증**
+- `docker compose -f docker-compose.prod.yml -f docker-compose.monitoring.yml
+  --env-file .env.prod config` - 머지 성공(exit 0)
+- Alertmanager 단독 기동 + 실제 웹훅 형식 값으로 재검증 -
+  `"Completed loading of configuration file"` 확인(위 버그 수정 후)
+- Grafana 대시보드 3종 JSON `python3 -m json.tool`로 문법 검증 통과
+
+**다음 작업**
+- Phase 2(로그, Loki+Promtail/Alloy, JSON 구조화 로깅+MDC traceId)
+- Phase 3(트레이스, Tempo+micrometer-tracing, Spring↔quant-engine 요청
+  상관관계)
+- 실제 EC2에서의 전체 스택 기동 검증(리소스 사용량 실측 포함)은 사용자가
+  EC2 프로비저닝 후 직접 진행 필요
 
 </details>
