@@ -1650,4 +1650,13 @@ docker compose -f docker-compose.prod.yml -f docker-compose.monitoring.yml --env
 - 저장소 동시 편집 위험은 구조적으로 남아있음 - 여러 세션을 병행
   운영할 계획이면 세션별 git worktree 분리를 고려할 것
 
+**추가**: 같은 세션에서 이어서 사용자가 "기동하자마자 FRED 요청이
+RST_STREAM으로 11분간 66회 반복 실패한다"고 리포트. curl로
+`fred.stlouisfed.org`에 HTTP/1.1(200 정상)·HTTP/2(즉시 스트림 리셋)를
+직접 재현해 원인 확정 - 이 엔드포인트 앞단이 HTTP/2 요청을 거부함.
+Python 엔진 h2c 버그(Phase 3)와 동일한 해법(JDK HttpClient를 HTTP/1.1로
+고정)을 `FredApiConfig`에 적용, 커밋 `a9c9448`. `infra/fred` 패키지
+나머지 파일(Client/Properties/exception)은 다른 세션의 미완성
+작업이라 손대지 않고 이 설정 파일 하나만 분리 커밋함.
+
 </details>
