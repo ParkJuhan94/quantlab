@@ -684,6 +684,23 @@ com.quantlab/{feature}/
   "지금 갱신 중"임을 알린다.** 차트 안에 펄스를 찍기보다(일봉처럼
   "진행 중" 개념이 맞지 않는 차트도 있음) 상태 라벨("장중" 등) 옆에
   독립된 작은 점을 붙이는 편이 재사용하기 쉽고 의미도 분명하다.
+- **리퀴드 글래스(반투명 유리) 적용은 "정적 크기 패널 vs 잦은 리사이즈
+  요소"를 먼저 판단하고 시작한다.** 판단 기준·4-layer 구조·Safari 폴백
+  한계·성능 체크 방법은 전역 `~/.claude/CLAUDE.md` "리퀴드 글래스(Liquid
+  Glass) 구현 가이드" 참고(2026-07-19, 이 프로젝트에서 실제로 구현하며
+  확정). quantlab 현재 적용 현황:
+  - **진짜 굴절**(`liquid-glass-refract`, SVG `feDisplacementMap`) - 고정
+    크기 모달인 `GroupNameDialog`/`GroupQuickActionModal`/
+    `WatchlistGroupEditModal`(관심 그룹 관리 모달 3종)
+  - **블러 전용**(`liquid-glass`, 굴절 없음) - `SearchOverlay`(검색 모달).
+    `h-fit`이라 검색 결과 개수에 따라 높이가 계속 바뀌어 굴절을 걸면
+    타이핑할 때마다 필터 리전이 재계산됨 - 정적 패널이 아니라서 다운그레이드
+  - SVG 필터 정의는 `LiquidGlassDefs.tsx`에 앱 루트(`App.tsx`) 한 번만
+    마운트, Safari 조합 버그 판별은 `utils/browserSupport.ts`
+  - 홈 헤더의 검색 트리거 박스(`AppHeader.tsx`)는 아직 미적용 - `AppHeader`가
+    `sticky`가 아니라 일반 문서 흐름에 있어 뒤로 스크롤되는 콘텐츠가 없고,
+    `backdrop-filter`가 블러링할 대상 자체가 없어 적용해도 시각 효과가
+    거의 없음(헤더를 `sticky`로 바꾸는 건 이번 스코프보다 큰 변경이라 보류)
 
 ---
 
@@ -1658,5 +1675,111 @@ Python 엔진 h2c 버그(Phase 3)와 동일한 해법(JDK HttpClient를 HTTP/1.1
 고정)을 `FredApiConfig`에 적용, 커밋 `a9c9448`. `infra/fred` 패키지
 나머지 파일(Client/Properties/exception)은 다른 세션의 미완성
 작업이라 손대지 않고 이 설정 파일 하나만 분리 커밋함.
+
+</details>
+
+<details>
+<summary>2026-07-19 - 스코어링 백테스팅 인프라 구축 (Phase A~D: KIS 연동 + 국내/해외 유니버스 백필 + 스코어 로직 개선)</summary>
+
+**배경**: `quant-engine/calculator/scorer.py`의 v2 스코어링(추세추종/평균회귀
+두 축)은 코드에 "TODO: 초기값, 백테스트 후 튜닝 필요"로 명시된 임계값이
+많았으나 백테스트 인프라 자체가 없었다. 별도 대화(claude-fable-5)에 스코어링
+방식과 백테스팅 계획을 설명해 외부 방법론 리뷰를 받고(`quant-engine/docs/
+BACKTEST_METHODOLOGY_REVIEW.md`, gitignore 처리), 그 권고를 실제 계획
+(Phase A~G)에 반영해 이번 세션에서 A~D를 구현·라이브 검증했다.
+
+**변경 사항**
+
+1. **스코어 로직 선행 수정 (Phase D)** — 백테스트 전에 고쳐야 할 설계 결함들:
+   - **거래량 배율 비대칭 버그 수정**: `_apply_volume_multiplier`가
+     `score>50이면 곱하고 <50이면 나누는` 방식이라 같은 거래량 조건에서
+     강세/약세가 다르게 증폭됐다(multiplier=1.3일 때 60점→78, 40점→30.8 -
+     편차 기준 2.8배 vs 1.92배). Fable 리뷰가 지적한 항목을 실제 코드와
+     대조해 확인 후 `dev = score - 50; adjusted = 50 + dev * multiplier`로
+     대칭화, 50 경계 불연속도 함께 해소. 회귀 테스트로 대칭성 자체를 검증
+     (`test_multiplier_amplifies_symmetric_deviation_from_50`).
+   - **사분면(Quadrant) 라벨 도입**: 종합점수(두 축 평균)만으로는 "상승추세
+     눌림목"과 "추세 연장·과열"이 비슷한 값으로 뭉개지는 문제(Fable 지적)를
+     보완. 놀랍게도 `commentary.py`가 코멘트 템플릿 선택용으로 이미 동일한
+     4분면 분류 로직(`_classify_quadrant`)을 내부적으로 갖고 있었음을
+     발견 - 이를 `scorer.py`로 옮겨 `ScoreResult.quadrant`로 노출하고
+     `commentary.py`는 그 값을 재사용하도록 리팩터(중복 분류 로직 제거,
+     단일 소스화). Spring 쪽 계약(`Score` 엔티티, `ScoreMapper`,
+     `ScoreResponse`, `ScoreBatchApiResponse`, 신규 `Quadrant` enum)까지
+     전파.
+   - Fable이 지적한 다른 항목(`ewm(adjust=False)`, RSI Wilder 방식, 수정주가
+     요청)은 실제 코드 대조 결과 **이미 반영돼 있었음**을 확인해 손대지 않음.
+
+2. **KIS(한국투자증권) 해외주식 연동 (Phase A)** — 토스는 국내 전용이라
+   해외 유니버스는 별도 벤더가 필요. `infra/kis` 패키지 신규(토큰 관리 +
+   401 감지 시 무효화·재시도 - 기존 `TossTokenManager` 패턴 재사용, 해외
+   현재가/기간별시세 클라이언트). 실제 앱키로 라이브 검증(NAS/AAPL
+   현재가·일별시세 둘 다 `rt_cd=0` 정상 확인, DTO 필드 최초 설계 그대로
+   일치). 해외 종목마스터는 REST API가 아니라 zip 압축된 CP949 탭구분
+   정적 파일(`https://.../{code}mst.cod.zip`)로 제공됨을 실제 다운로드로
+   확인 후 파싱 구현(NASDAQ 3,921종목/NYSE 2,443종목 실제 등록 검증) -
+   ETF는 종목구분 코드(2:주식/3:ETF)로 자동 구분됨을 확인해 별도 필터 불요.
+
+3. **국내/해외 유니버스 2-pass 백필 (Phase C)** — 거래대금(종가×거래량)
+   상위 500종목을 60일 스캔 → 랭킹 → 400일 심화 백필하는 2단계 구조.
+   국내는 REIT를 이름 기반(포함 매칭 + 예외 2건: 메리츠금융지주/
+   블리츠웨이엔터테인먼트)으로 제외, ETF는 종목마스터 소스(KIND)가
+   원래 법인만 다뤄 자동 제외됨을 실측 확인. 해외는 미국 달러 소수점
+   가격을 기존 `DailyPrice`(Long 컬럼, 원화 정수 전제)에 못 담아
+   `OverseasDailyPrice`(Double 컬럼) 별도 엔티티로 분리.
+   국내 500종목/해외(AAPL·MSFT 스모크테스트) 모두 라이브 백필 검증
+   완료(국내: 실제 SK하이닉스/삼성전자 등 대형주가 랭킹 상위 일치).
+
+4. **국내 지수 벤치마크 이력 (Phase B)** — 초과수익률 계산 기준선.
+   네이버 금융 비공식 API가 `pageSize` 상한(60)만 있고 `page`를 늘리면
+   그 이전 데이터로 끊김 없이 이어짐을 실제 호출로 확인, 페이지네이션
+   오버로드 추가(기존 메서드는 안 건드림). KOSPI/KOSDAQ 각 420일 라이브
+   백필 검증, 재실행 시 멱등성 확인.
+
+**변경 파일** (신규 파일 다수 생략, 대표 항목만)
+- `quant-engine/calculator/scorer.py` - 거래량 대칭화, 사분면 분류/노출
+- `quant-engine/calculator/commentary.py` - 사분면 분류 로직 제거, scorer.py 값 재사용
+- `quant-engine/schemas.py`, `main.py` - `quadrant` 필드 노출
+- `backend/core/.../infra/kis/**` - KIS 클라이언트 신규(토큰/현재가/일별시세/마스터파일)
+- `backend/core/.../score/domain/{Score,Quadrant}.java`, `dto/mapper/ScoreMapper.java` 등 - 사분면 계약 전파
+- `backend/core/.../market/service/{BenchmarkIndexBackfillService,DomesticUniverseSelectionService,OverseasUniverseSelectionService}.java` - 유니버스 선정/백필
+- `backend/core/.../price/domain/OverseasDailyPrice.java`, `price/service/OverseasDailyPriceBackfillService.java` - 해외 소수점 가격 별도 엔티티
+- `backend/core/.../stock/service/OverseasStockMasterSyncService.java`, `stock/domain/MarketType.java` - 해외 종목마스터, NASDAQ/NYSE 추가(국내 전용 루프 보호)
+- `backend/api/.../DevController.java`, `application.yml`, `.env.example` - 수동 트리거 엔드포인트 + KIS 설정(다른 세션의 동시 변경과 분리해 추가분만 반영)
+
+**결정 사항**
+- 백테스트 방법론은 백지에서 설계하지 않고 외부 리뷰(Fable)를 받아 검증 후
+  실행 - 리뷰가 지적한 항목을 실제 코드와 하나하나 대조해 "이미 반영됨 vs
+  진짜 고쳐야 함"을 구분한 뒤 진짜 버그(거래량 비대칭)만 수정. 근거 없이
+  전부 뜯어고치지 않음.
+- 해외 leg의 전체 6,364종목 라이브 실행은 이번 세션에서 보류(소규모
+  스모크테스트만 검증) - 국내 500종목 백필에서만도 실행 환경(다른 세션의
+  동시 백엔드 인스턴스와 메모리 경합)이 예측 불가능하게 프로세스를 죽여
+  여러 라운드로 나눠 재개해야 했음. 전체 해외 스캔은 규모가 더 커 별도
+  세션/시점에 진행하기로.
+- 이 세션도 다른 세션들과 같은 워킹 디렉터리를 공유(피드/피드백/유저/
+  업로드 등 무관한 대규모 변경이 동시에 쌓여 있었음). 커밋 전 `Score.java`/
+  `ScoreMapper.java`/`application.yml`/`.env.example`/`DevController.java`/
+  `.gitignore` 6개 파일은 다른 세션의 변경과 같은 파일에 섞여 있어, HEAD
+  버전으로 되돌린 뒤 내 변경분만 재적용해 스테이징하고 작업트리는 다시
+  전체 내용으로 복원하는 방식으로 정확히 분리해 커밋함.
+- Phase B(벤치마크 백필)가 의존하는 `NaverFinanceApiClient`의 페이지네이션
+  오버로드는 다른 세션이 만든 완전히 새 파일(아직 미커밋) 위에 추가한
+  것이라, 그 파일 전체를 내 커밋에 포함시키면 다른 세션의 작업 전체를
+  잘못 귀속시키게 된다 - 커밋하지 않고 남겨둠. 즉 이번 세션이 커밋한
+  Phase B 코드는 그 커밋 히스토리만 체크아웃하면 컴파일이 안 되고, 다른
+  세션이 `infra/naver` 패키지를 커밋해야 완전해진다(작업트리에는 이미
+  합쳐진 상태로 있어 실제 동작·테스트는 전부 확인됨).
+
+**다음 작업**
+- Phase E: `compute_scores(df)` 순수함수화(라이브·백테스트 공용), Python
+  `/backtest/score` 엔드포인트, 백테스트 결과 저장(Spring, `score_version` 태그)
+- Phase F: 백테스트 프론트 페이지(사분면 배경 오버레이, 분위수 버킷 테이블,
+  Rank IC, 디스클레이머)
+- Phase G: 등급 컷오프 등 근거 기반 튜닝(백테스트 결과 나온 뒤)
+- 해외 유니버스 전체 6,364종목 실제 스캔+랭킹+백필은 미실행 - 다음 세션에서
+  국내와 동일한 라운드 방식으로 진행 필요
+- 다른 세션의 미커밋 변경(feed/feedback/user/upload, 프론트엔드 대부분)은
+  이번 세션 범위 밖 - 손대지 않음
 
 </details>
