@@ -1,6 +1,6 @@
 {
   "uid": "quantlime-business",
-  "title": "QuantLab - 비즈니스 지표 (Toss / 스윕 / 퀀트엔진)",
+  "title": "QuantLime - 비즈니스 지표 (Toss / 스윕 / 퀀트엔진)",
   "tags": ["quantlime", "business"],
   "timezone": "Asia/Seoul",
   "schemaVersion": 39,

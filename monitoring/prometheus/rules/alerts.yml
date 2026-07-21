@@ -11,7 +11,7 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "QuantLab 백엔드가 다운됨"
+          summary: "QuantLime 백엔드가 다운됨"
           description: "Prometheus가 2분 이상 backend(actuator/prometheus)를 스크랩하지 못했습니다."
 
       - alert: QuantEngineDown
