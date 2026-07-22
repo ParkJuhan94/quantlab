@@ -1,4 +1,4 @@
-# QuantLab — CLAUDE.md
+# QuantLime — CLAUDE.md
 
 > 이 파일은 Claude Code가 프로젝트 컨텍스트를 유지하기 위한 핵심 문서다.
 > 개발 진행 중 변경사항이 생기면 이 파일을 먼저 업데이트할 것.
@@ -24,7 +24,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 프로젝트명 | QuantLab |
+| 프로젝트명 | QuantLime |
 | 목적 | 국내 주식 기술적 지표 스코어링 + 관심 종목 실시간 모니터링 |
 | 범위 | 국내 주식 한정 / 조회·분석만 (주문 기능 없음) |
 | 개발자 스택 | Java/Spring 백엔드 개발자, Python 병행 학습 중 |
@@ -37,7 +37,7 @@
 <summary>펼쳐서 보기</summary>
 
 ```
-quantlab/
+quantlime/
 ├── CLAUDE.md                   # 이 파일
 ├── README.md
 ├── .gitignore
@@ -66,8 +66,8 @@ quantlab/
 │   ├── .env.example            # 환경변수 템플릿
 │   ├── Dockerfile              # 멀티스테이지(JDK 빌더 → JRE 런타임, Phase 6)
 │   ├── api/                    # REST 컨트롤러, Swagger, 전역 예외 핸들러
-│   │   └── src/main/java/com/quantlab/
-│   │       ├── QuantLabApplication.java
+│   │   └── src/main/java/com/quantlime/
+│   │       ├── QuantLimeApplication.java
 │   │       ├── common/controller/   # HealthCheck
 │   │       ├── common/config/       # SwaggerConfig
 │   │       ├── common/exception/    # GlobalExceptionHandler
@@ -76,13 +76,13 @@ quantlab/
 │   │       ├── application.yml       # 공통 + dev 기본값
 │   │       └── application-prod.yml  # 프로덕션 오버라이드(Phase 6)
 │   ├── core/                   # 서비스, 리포지토리, 도메인, DTO
-│   │   └── src/main/java/com/quantlab/
+│   │   └── src/main/java/com/quantlime/
 │   │       ├── common/              # TimeBaseEntity, Config, Exception
 │   │       ├── stock/               # 종목 도메인, 서비스, CSV 적재
 │   │       ├── price/               # 시세 도메인, 수집 서비스, 스케줄러
 │   │       └── infra/toss/          # 토스증권 API 클라이언트, 토큰 관리
 │   ├── common/                 # 공유 유틸 (java-library, Spring 미포함)
-│   │   └── src/main/java/com/quantlab/common/exception/ErrorCode.java
+│   │   └── src/main/java/com/quantlime/common/exception/ErrorCode.java
 │   └── event/                  # Kafka 이벤트 (향후 확장)
 │
 ├── quant-engine/               # Python FastAPI 퀀트 계산 서버
@@ -428,7 +428,7 @@ quantlab/
 </details>
 
 <details>
-<summary>🟡 Phase 6 — 배포 (아티팩트 준비 완료, 실제 EC2 배포는 사용자 진행 필요)</summary>
+<summary>✅ Phase 6 — 배포 (완료, EC2 실배포 완료)</summary>
 
 - [x] Docker Compose (단일 EC2 + nginx 리버스 프록시 아키텍처)
   - 애플리케이션 3종 Dockerfile(`backend/Dockerfile`·`quant-engine/Dockerfile`·
@@ -441,7 +441,7 @@ quantlab/
     dev용 `docker-compose.yml`과 같은 디렉터리라 프로젝트명(컨테이너명·
     볼륨명)이 겹쳐 dev MySQL/Redis 컨테이너·볼륨을 그대로 재사용(사실상
     덮어씀)해버리는 문제를 발견 - `docker-compose.prod.yml`에
-    `name: quantlab-prod`를 명시하고 컨테이너명도 `quantlab-prod-*`로
+    `name: quantlime-prod`를 명시하고 컨테이너명도 `quantlime-prod-*`로
     분리해 해결. 로컬 dev 인프라를 실제로 손상시키기 전에 잡은 문제
   - `/api/health` 200, SPA 렌더, 종목 마스터 CSV 자동적재(2706건)까지
     실제 컨테이너 기동으로 확인
@@ -454,12 +454,16 @@ quantlab/
   - 실제 GitHub Actions 실행과 EC2 배포 자체는 이 세션에서 검증
     불가(사용자 AWS 계정·시크릿 필요) - `docs/DEPLOYMENT.md` 런북으로
     안내
-- [ ] AWS EC2 배포 — **사용자가 직접 진행해야 하는 부분**(EC2 프로비저닝,
-  Elastic IP, IAM 인스턴스 역할, 보안그룹, GitHub Secrets 등록, OAuth
-  콘솔 운영 도메인 등록). 절차는 `docs/DEPLOYMENT.md` 참고
+- [x] AWS EC2 배포 — 사용자가 `docs/DEPLOYMENT.md` 런북을 따라 직접
+  완료(EC2 프로비저닝, Elastic IP, IAM 인스턴스 역할, 보안그룹, GitHub
+  Secrets 등록 등). 이 체크리스트가 실제 배포 완료 이후에도 한동안
+  미완료로 표시돼 있었음 - quantlab→quantlime 리네이밍 작업(2026-07-21)
+  중 사용자 확인으로 발견해 정정. **문서가 실제 인프라 상태를 못 따라가는
+  사례가 실제로 있었으니, Phase 완료 여부는 주기적으로 실제 상태와
+  대조할 것**
 - [x] 로그 수집 / 모니터링·알림 / DB 백업 (아티팩트 준비 완료)
   - 로그: `docker-compose.cloudwatch.yml`(신규 오버레이) - 5개 서비스
-    모두 `awslogs` 드라이버로 `/quantlab/{서비스명}` 로그 그룹에 전송.
+    모두 `awslogs` 드라이버로 `/quantlime/{서비스명}` 로그 그룹에 전송.
     `docker-compose.prod.yml` 본체에 안 넣은 이유는 `awslogs` 드라이버가
     컨테이너 기동 시점에 AWS 자격증명을 요구해서, 넣었으면 Phase 6에서
     확립해둔 로컬 빌드 검증 경로(`docker compose -f docker-compose.prod.yml
@@ -528,7 +532,7 @@ catch-all(`@ExceptionHandler(Exception.class)`)이 Spring 6의
 
 패키지는 Feature 기반으로 구성:
 ```
-com.quantlab/{feature}/
+com.quantlime/{feature}/
 ├── controller/    # api 모듈
 ├── service/       # core 모듈
 ├── repository/    # core 모듈
@@ -729,7 +733,7 @@ com.quantlab/{feature}/
   `VITE_API_BASE_URL=http://localhost:8081 npm run dev -- --port 3002`로
   띄워 이 8081 백엔드를 바라보게 한다(`frontend/src/config/env.ts` 기본값이
   `http://localhost:8080`이라 반드시 오버라이드해야 함). **종료는 절대
-  `pkill -f "QuantLabApplication"`처럼 프로세스명 패턴을 쓰지 않는다** -
+  `pkill -f "QuantLimeApplication"`처럼 프로세스명 패턴을 쓰지 않는다** -
   이 패턴은 포트를 구분하지 않아 사용자의 8080 세션이 실행 중이면 그것까지
   함께 죽일 수 있다. 대신 `lsof -ti:8081 | xargs -r kill -9`로 8081에
   바인딩된 PID만 정확히 찾아서 종료할 것(전역 `~/.claude/CLAUDE.md` "로컬
@@ -765,10 +769,10 @@ cd quant-engine && uvicorn main:app --reload --port 8000
 cd frontend && npm run dev
 
 # MySQL 접속
-mysql -h 127.0.0.1 -P 3308 -u root -pquantlab quantlab
+mysql -h 127.0.0.1 -P 3308 -u root -pquantlime quantlime
 
 # Redis 접속
-docker exec -it quantlab-redis redis-cli
+docker exec -it quantlime-redis redis-cli
 
 # 배포 이미지 로컬 빌드 검증 (AWS 자격증명 불필요, docs/DEVELOPMENT.md §3 참고)
 docker compose -f docker-compose.prod.yml build

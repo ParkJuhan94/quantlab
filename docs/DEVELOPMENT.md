@@ -189,7 +189,7 @@ const { scrollWidth, clientWidth } = await mobilePage.evaluate(() => ({
 cp .env.prod.example .env.prod
 
 # 이미지 3개 빌드 + 전체 스택 기동(dev용 docker-compose.yml과는
-# name: quantlab-prod로 프로젝트명이 분리돼 있어 dev MySQL/Redis와
+# name: quantlime-prod로 프로젝트명이 분리돼 있어 dev MySQL/Redis와
 # 컨테이너·볼륨이 겹치지 않는다)
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
@@ -233,7 +233,7 @@ Alertmanager 설정(`monitoring/alertmanager/alertmanager.yml`)은 `${VAR}`
 ### 신규 셸 스크립트는 문법 검사까지만
 
 `scripts/*.sh`(MySQL 백업, cron 등록)는 EC2 호스트 전제(컨테이너 이름
-`quantlab-prod-*`을 직접 참조, `aws` CLI 호출)라 로컬에서 실행까지는
+`quantlime-prod-*`을 직접 참조, `aws` CLI 호출)라 로컬에서 실행까지는
 의미 없다. 문법 오류만 로컬에서 잡는다:
 
 ```bash
@@ -252,7 +252,7 @@ bash -n scripts/install-cron.sh
   `docker-compose.yml`과 같은 디렉터리라 기본 프로젝트명(디렉터리명)을
   공유해 로컬에서 prod 스택을 검증차 띄우자 dev MySQL/Redis 컨테이너·
   볼륨을 그대로 재사용(사실상 덮어씀)해버린 것 — 실제로 `docker compose
-  up`을 돌려보고 `Recreate` 로그를 보고서야 발견했다(`name: quantlab-prod`
+  up`을 돌려보고 `Recreate` 로그를 보고서야 발견했다(`name: quantlime-prod`
   로 해결).
 - `GlobalExceptionHandler`의 catch-all이 매핑되지 않은 모든 경로를
   500으로 응답시키고 있던 것 — `/dev/auth/token`이 prod 프로파일에서

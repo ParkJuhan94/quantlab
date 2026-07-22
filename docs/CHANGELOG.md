@@ -1,4 +1,4 @@
-# QuantLab — 작업 기록 (세션별 변경 히스토리)
+# QuantLime — 작업 기록 (세션별 변경 히스토리)
 
 > `CLAUDE.md`에서 분리된 문서(2026-07-20). 세션이 쌓일수록 무한정
 > 늘어나는 히스토리라, 참조 문서(구조/컨벤션/현재 Phase 현황)와 분리해
@@ -83,7 +83,7 @@
 - `docs/DEPLOYMENT.md`(신규), `CLAUDE.md` Phase 6 — 문서
 
 **결정 사항**
-- `docker-compose.prod.yml`에 `name: quantlab-prod`를 명시해 dev용
+- `docker-compose.prod.yml`에 `name: quantlime-prod`를 명시해 dev용
   compose와 프로젝트명(컨테이너·볼륨)을 분리 - 로컬 검증 중 실제로
   겹치는 것을 발견하고 나서 수정(Phase 6 섹션에 상세 기록)
 - 컨테이너 시크릿은 `.env.prod`(gitignore) 하나로 통일하고, compose
@@ -177,9 +177,9 @@
   (구글은 애초에 이름/닉네임이 분리된 필드가 아니라 되돌릴 대상이 없었음)
 
 **변경 파일**
-- `backend/core/src/main/java/com/quantlab/infra/oauth/NaverOAuthClient.java` - `DEFAULT_NICKNAME` fallback 추가
-- `backend/core/src/main/java/com/quantlab/infra/oauth/KakaoOAuthClient.java` - null 체크 → `StringUtils.hasText` 강화
-- `backend/core/src/test/java/com/quantlab/infra/oauth/{Kakao,Naver}OAuthClientTest.java` - fallback 검증 테스트 추가
+- `backend/core/src/main/java/com/quantlime/infra/oauth/NaverOAuthClient.java` - `DEFAULT_NICKNAME` fallback 추가
+- `backend/core/src/main/java/com/quantlime/infra/oauth/KakaoOAuthClient.java` - null 체크 → `StringUtils.hasText` 강화
+- `backend/core/src/test/java/com/quantlime/infra/oauth/{Kakao,Naver}OAuthClientTest.java` - fallback 검증 테스트 추가
 
 **결정 사항**
 - 카카오/네이버의 "닉네임" 동의 항목은 콘솔에서 필수 동의로 바꾸면 항상
@@ -216,8 +216,8 @@
   글자 원형 placeholder로 조용히 대체
 
 **변경 파일**
-- `backend/core/src/main/java/com/quantlab/stock/dto/response/StockDetailResponse.java` - `logoUrl` 필드 추가
-- `backend/core/src/main/java/com/quantlab/stock/dto/mapper/StockMapper.java` - 종목 코드 기반 로고 URL 생성
+- `backend/core/src/main/java/com/quantlime/stock/dto/response/StockDetailResponse.java` - `logoUrl` 필드 추가
+- `backend/core/src/main/java/com/quantlime/stock/dto/mapper/StockMapper.java` - 종목 코드 기반 로고 URL 생성
 - `frontend/src/types/stock.ts` - `logoUrl` 타입 반영
 - `frontend/src/components/common/StockLogo.tsx`(신규) - 로드 실패 폴백 포함 공용 로고 컴포넌트
 - `frontend/src/components/search/SearchResultItem.tsx`, `frontend/src/pages/StockDetailPage.tsx` - 로고 적용
@@ -246,10 +246,10 @@
 </details>
 
 <details>
-<summary>2026-07-12 - 홈 화면 리디자인(claude.ai/design 시안 "Quantlab 토스증권 UI 리디자인" 반영)</summary>
+<summary>2026-07-12 - 홈 화면 리디자인(claude.ai/design 시안 "QuantLime 토스증권 UI 리디자인" 반영)</summary>
 
 **변경 사항**
-- claude.ai/design 프로젝트에서 가져온 시안(`Quantlab Screener.dc.html`,
+- claude.ai/design 프로젝트에서 가져온 시안(`Quantlime Screener.dc.html`,
   turn t3/옵션 2c "홈")을 기준으로 `/`(기존 `WatchlistPage`)를 새
   `HomePage`로 교체 - 검색 오버레이, 주요 지수 위젯, 실시간 시세
   랭킹 테이블, 접이식 우측 패널(관심/최근 본/실시간 탭)로 구성.
@@ -302,7 +302,7 @@
   구조 변경이 필요해지므로, 이번 범위(홈 화면 UI) 밖의 결정으로 보고
   현행 유지
 - 실시간 랭킹 테이블에 있던 "해외" 스코프 필터·통화($/원) 토글은
-  구현하지 않음 - QuantLab은 "국내 주식 한정"(§1)이 제품 범위이고
+  구현하지 않음 - QuantLime은 "국내 주식 한정"(§1)이 제품 범위이고
   시안의 해외종목 예시는 이 제품엔 애초에 해당하지 않는 개념이라
   판단. 다만 나스닥/S&P500 등 해외 지수 "위젯"은 `docs/ROADMAP.md` #1이
   이미 정보성 표시로 계획하고 있어 그대로 유지
@@ -410,12 +410,12 @@
   되는 게 아니라 복잡도만 늘어난다고 판단
 - 검증 도중 발견: 이전 세션에서 `pkill -f ":api:bootRun"`으로 백엔드를
   껐다고 여겼으나, 그 패턴은 그레이들 래퍼 프로세스만 매치하고 실제
-  포그라운드로 남는 스프링 부트 JVM 자식 프로세스(`com.quantlab.
-  QuantLabApplication`)는 매치하지 못해 살아있었음 - 이번 세션 초반
+  포그라운드로 남는 스프링 부트 JVM 자식 프로세스(`com.quantlime.
+  QuantLimeApplication`)는 매치하지 못해 살아있었음 - 이번 세션 초반
   `/api/market/**` permitAll 반영 전 코드로 계속 떠 있던 그 프로세스가
   새 bootRun의 포트 바인딩을 막아 401이 나온 것으로 원인 파악 후 PID로
   직접 kill해서 해결. 앞으로 bootRun을 내릴 땐 프로세스명
-  (`QuantLabApplication`)까지 같이 pkill할 것
+  (`QuantLimeApplication`)까지 같이 pkill할 것
 - Testcontainers 기반 통합 테스트(`MarketControllerTest` 포함)는 이
   로컬 환경에서 "Could not find a valid Docker environment"로 전부
   실패함을 확인(기존 `PriceControllerTest`도 동일하게 실패해 내
@@ -575,8 +575,8 @@
   API 변경 여부를 더 넓게 검토해야 해 이번 스코프를 벗어난다고 판단
 
 **검증**
-- `./gradlew :api:test --tests 'com.quantlab.market.controller.
-  MarketControllerTest' --tests 'com.quantlab.price.controller.
+- `./gradlew :api:test --tests 'com.quantlime.market.controller.
+  MarketControllerTest' --tests 'com.quantlime.price.controller.
   PriceControllerTest'` - 11개 전부 통과(수정 전엔 11개 전부 실패)
 - `./gradlew :api:test :core:test` - 전체 스위트 회귀 없이 통과
 
@@ -632,7 +632,7 @@
 - `backend/core/.../infra/toss/TossApiClient.java` - `withTokenRetry` 헬퍼로
   4개 메서드(`getDailyCandles`/`getCurrentPrices`/`getExchangeRate`/
   `getMarketCalendar`) 전부 401 감지 시 1회 재시도하도록 통일
-- `backend/core/src/test/java/com/quantlab/infra/toss/{TossApiClientTest,
+- `backend/core/src/test/java/com/quantlime/infra/toss/{TossApiClientTest,
   TossTokenManagerTest}.java`(신규) - 401 재시도 성공/재시도도 실패/429는
   무효화 안 함 3케이스 + 토큰 캐시 히트/미스/invalidateToken 3케이스
 
@@ -740,7 +740,7 @@
 <summary>2026-07-16 - 관측성 스택 신설(Prometheus/Grafana/Alertmanager, Phase 1: 메트릭+대시보드+알림)</summary>
 
 **변경 사항**
-- 지금까지 QuantLab의 관측성은 호스트 레벨(얕은 `/api/health`, cron이
+- 지금까지 quantlime의 관측성은 호스트 레벨(얕은 `/api/health`, cron이
   CloudWatch로 보내는 헬스/메모리/디스크 3개 지표)뿐이었고 **앱 내부는
   완전히 깜깜했음** - Actuator/Micrometer가 전무해 JVM 상태, HTTP
   지연/에러율은 물론, 바로 하루 전(2026-07-15/16) 재설계한 Toss
@@ -783,7 +783,7 @@
 - **모니터링 스택**: `docker-compose.monitoring.yml` 신규(기존
   `docker-compose.cloudwatch.yml` 분리 패턴을 그대로 미러링) - Prometheus,
   Alertmanager, node-exporter, cAdvisor, Grafana(대시보드 3종: JVM,
-  Spring Boot HTTP, QuantLab 비즈니스 지표 - `monitoring/grafana/`에
+  Spring Boot HTTP, quantlime 비즈니스 지표 - `monitoring/grafana/`에
   프로비저닝 JSON으로 커밋해 최초 기동 시 자동 로드). cloudwatch
   오버레이와의 결정적 차이: **AWS 자격증명이 필요 없어 로컬에서도 실제
   `up`까지 기동·검증 가능**(로컬 Grafana 3000/프론트 3001과 안 겹치게
@@ -791,7 +791,7 @@
   - 알림 규칙은 `monitoring/prometheus/rules/alerts.yml`에 코드로:
     BackendDown/QuantEngineDown/HighHttp5xxRate/TossRateLimitSpike/
     QuantEngineFailureRate/JvmHeapHigh/HostMemoryHigh/HostDiskHigh 8종
-  - Alertmanager → Slack `#quantlab-alerts`(기존 사용자 피드백용 Incoming
+  - Alertmanager → Slack `#quantlime-alerts`(기존 사용자 피드백용 Incoming
     Webhook과 별개 채널로 분리 등록 권장, `.env.prod.example`의
     `SLACK_ALERT_WEBHOOK_URL`)
 - **버그 발견 + 수정(로컬 실제 기동 검증 중)**: Alertmanager 설정 파일은

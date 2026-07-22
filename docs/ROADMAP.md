@@ -1,4 +1,4 @@
-# QuantLab 로드맵 — HTS 미구현 기능 타당성 분석
+# QuantLime 로드맵 — HTS 미구현 기능 타당성 분석
 
 ## 개요
 토스 HTS 웹 화면 기능 중 **토스 Open API만으로는 불가능**한 것들을, 외부 API
