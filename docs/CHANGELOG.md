@@ -1076,3 +1076,80 @@ BACKTEST_METHODOLOGY_REVIEW.md`, gitignore 처리), 그 권고를 실제 계획
   이미 기록됨(중복 기록 안 함)
 
 </details>
+
+<details>
+<summary>2026-07-22 - 프리미엄 구독 결제 기능 신규 구현(토스페이먼츠, 사업자등록 전 - 테스트 키 전용)</summary>
+
+**배경**
+사업자등록이 아직 안 된 상태에서 프리미엄 구독 결제 기능을 미리
+구현해달라는 요청. 실결제는 불가능하지만, 토스페이먼츠는 개발자센터
+이메일 가입만으로 테스트 키를 즉시 발급하므로 테스트 키로 전체 플로우를
+지금 구현해두고, 사업자등록 완료 후 `.env`의 키만 라이브 키로 교체하면
+되도록 설계. 결제 방식은 자동결제(빌링키)만 지원하기로 확정 - 토스페이먼츠
+빌링 API가 카드에만 적용되는 기술적 제약이 있어 결제수단은 카드로
+고정되고(휴대폰·카카오페이·네이버페이 등은 애초에 빌링키 발급 대상이
+아님), 대신 장기 플랜(6/12개월) 결제 시 카드사 할부(`cardInstallmentPlan`
+파라미터, 자동결제 승인 API에도 지원됨을 문서로 확인)를 붙여 목돈 부담을
+줄이는 쪽으로 방향을 잡았다.
+
+**변경 사항**
+- 백엔드: `subscription`(SubscriptionPlan/Subscription 도메인 - 사용자당
+  row 1건, 갱신마다 상태 전이) + `payment`(청구 시도 이력) 신규 도메인
+  패키지. 기존 `watchlist` 도메인 구조(entity/repository/service/dto/exception)
+  를 그대로 따름
+- `infra/tosspayments` 외부 클라이언트 신규(`infra/toss`의
+  ExternalApiInvoker/에러코드 패턴 재사용, 시크릿키 Basic Auth라 토큰
+  관리자는 불필요) - 빌링키 발급/청구, 웹훅 서명 검증(HMAC-SHA256,
+  정확한 헤더명은 문서 접근 불가로 이번 세션에 확정 못함 - 실제 연동
+  시 재확인 필요)
+- 빌링키(카드 자동결제 권한 토큰) DB 컬럼은 AES-GCM으로 암호화
+  (`BillingKeyConverter`) - 암호화 키 미설정 시(로컬 개발) 평문 통과,
+  운영 배포 전 `SUBSCRIPTION_BILLING_KEY_ENCRYPTION_KEY` 필수
+  (`openssl rand -base64 32`로 생성)
+  - 트랜잭션 경계 이슈 발견: `PaymentService`에서 결제 승인(외부 API,
+    트랜잭션 밖) 후 DB 저장을 같은 클래스의 `@Transactional` 메서드로
+    self-invocation하면 Spring AOP 프록시를 안 거쳐 트랜잭션이 무시됨
+    (Phase 3 `ScorePersistenceService` 분리 때와 동일한 원인) - 저장
+    책임을 `SubscriptionService.activateOrResubscribe`로 분리해 해결
+  - 자동 갱신 재시도(`SubscriptionRenewalScheduler`, 매일 04:00): 실패
+    시 `nextBillingAt`을 +1일로 미뤄 재시도 예약, 3회 소진 시 PAST_DUE
+    전환(재시도를 스케줄하지 않으면 exact-equality 쿼리 특성상 다음날
+    조회에서 아예 안 잡혀 재시도가 안 되는 문제를 미리 발견해 반영)
+- 요금제 3개월/6개월/12개월(월 기준가 7,900원, 할인 없이 시딩) -
+  `SubscriptionPlanInitializer`(`StockMasterInitializer`와 동일한
+  ApplicationRunner 시딩 패턴, Flyway 없이 ddl-auto=update만 쓰는
+  프로젝트라 그대로 재사용)
+- API: `GET /api/subscription/plans`, `GET /api/subscription/me`
+  (customerKey 포함 - 프론트가 카드 등록 위젯을 열기 전에 필요),
+  `POST /api/subscription/billing-key`(빌링키 발급+즉시 첫결제 한 번에),
+  `POST /api/subscription/cancel`(자동갱신만 해제, 현재 주기 끝까지는
+  이용 가능), `GET /api/subscription/payments`, `POST
+  /api/webhooks/tosspayments`(서명 검증으로 인증 대체, SecurityConfig
+  permitAll 추가)
+- 프론트: `@tosspayments/tosspayments-sdk`(v2, 카드 자동결제 위젯) 도입,
+  `/subscribe`(플랜+할부 선택, 카드 등록 위젯 호출) · `/subscribe/result`
+  (successUrl/failUrl 콜백 - 위젯이 붙여주는 authKey/customerKey 쿼리
+  파라미터로 빌링키 발급 API 호출) 신규 페이지, `MyInfoPage`에 구독
+  상태/결제 이력 섹션 추가, `ProfileMenu`에 "구독 관리" 진입점 추가
+- 테스트: `SubscriptionServiceTest`/`PaymentServiceTest`(Mockito 단위),
+  `TossPaymentsApiClientTest`(MockRestServiceServer, 기존
+  `TossApiClientTest` 패턴), `SubscriptionControllerTest`(통합,
+  `@MockBean TossPaymentsApiClient`로 실제 토스 호출 격리) - 이 세션
+  환경엔 Docker가 없어 통합 테스트는 컴파일만 확인, 실행은 로컬에서
+  필요
+
+**결정 사항**
+- 프리미엄 혜택(관심종목 개수 제한 등 실제 기능 게이팅)은 이번 범위에서
+  보류 - `Subscription.status`로 프리미엄 여부를 판별할 수 있는 구조만
+  만들어두고, 어떤 기능을 잠글지는 별도 요청 때 진행하기로 함(사용자 확인)
+- `User` 엔티티에 plan/tier 필드를 추가하지 않음 - 프리미엄 여부가
+  `Subscription.status == ACTIVE`로 충분히 판별되므로 불필요한 컬럼 추가
+  회피
+
+**다음 작업**
+- 사업자등록 완료 후 토스페이먼츠 라이브 키로 교체 + 웹훅 헤더명 실제
+  연동 시 재확인
+- 프리미엄 게이팅 대상 기능 결정 및 구현(별도 요청 시)
+- Docker 있는 환경에서 `SubscriptionControllerTest` 통합 테스트 실행 확인
+
+</details>

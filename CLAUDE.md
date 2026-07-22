@@ -242,6 +242,24 @@ quantlime/
 |---|---|---|
 | POST | `/calculate/score/batch` | 관심 종목 일괄 스코어 계산 |
 
+### 구독 & 결제 (2026-07-22 신규 - 사업자등록 전, 테스트 키 전용)
+
+> 토스페이먼츠 **자동결제(빌링키)만** 지원 - 빌링 API가 카드에만 적용되는
+> 제약 때문에 결제수단은 카드로 고정(휴대폰/카카오페이/네이버페이는
+> 빌링키 발급 대상이 아님). 장기 플랜(6/12개월)은 카드사 할부
+> (`installmentMonths`, 0=일시불/2~12=할부개월) 선택 가능. 프리미엄
+> 혜택(기능 게이팅)은 아직 미구현 - `Subscription.status`로 판별 가능한
+> 구조만 있음. 상세는 `docs/CHANGELOG.md` 2026-07-22 항목 참고.
+
+| Method | URI | 설명 |
+|---|---|---|
+| GET | `/api/subscription/plans` | 판매중인 구독 플랜 목록(3/6/12개월) |
+| GET | `/api/subscription/me` | 내 구독 상태 + customerKey(카드 등록 위젯용) |
+| POST | `/api/subscription/billing-key` | 빌링키 발급 + 즉시 첫 결제(할부 적용) |
+| POST | `/api/subscription/cancel` | 자동갱신 해제(현재 주기 종료까지는 계속 이용 가능) |
+| GET | `/api/subscription/payments` | 결제 이력 조회 |
+| POST | `/api/webhooks/tosspayments` | 토스페이먼츠 웹훅(서명 검증, 인증 불필요) |
+
 ---
 
 ## 7. 기술적 지표 스코어링 로직
@@ -712,6 +730,7 @@ com.quantlime/{feature}/
 ## 10. 주의사항 / 금지사항
 
 - `.env` 파일 Git 커밋 금지
+- 토스페이먼츠는 사업자등록 전에는 **테스트 키만** 쓸 수 있다(실결제 불가). 라이브 전환 시 `TOSS_PAYMENTS_CLIENT_KEY`/`TOSS_PAYMENTS_SECRET_KEY`만 교체하면 되도록 설계돼 있음(§6 구독 & 결제 참고). 빌링키(카드 자동결제 권한 토큰) DB 컬럼은 `BillingKeyConverter`(AES-GCM)로 암호화되는데, `SUBSCRIPTION_BILLING_KEY_ENCRYPTION_KEY`가 비어 있으면 평문으로 통과된다 - 운영 배포 전 반드시 채울 것(`openssl rand -base64 32`). 웹훅 서명 헤더명(`TossPayments-Webhook-Signature`)은 2026-07-22 세션에서 문서 접근이 막혀 확정하지 못한 추정값 - 실제 연동 시 `TossWebhookVerifier`/`PaymentWebhookController` 재확인 필요
 - Python 엔진 장애 시 Spring에서 fallback 처리 필수 (이전 캐시 스코어 반환)
 - OHLCV 수집 배치는 장 마감(15:30) 이후에만 실행
 - 토스증권 API Rate Limit은 **초당 토큰 버킷** 방식 (일일 쿼터 없음, `X-RateLimit-Limit`은 초당 burst capacity, 매초 토큰 리필). `MARKET_DATA_CHART` 그룹 초당 한도(스펙 예시 10건) 기준 150ms 딜레이 유지. 429 시 `RATE_LIMIT_EXCEEDED`로 감지해 수 초 백오프 후 재시도(`X-RateLimit-Reset`/`Retry-After` 헤더 참고)
