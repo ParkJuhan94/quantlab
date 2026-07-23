@@ -1223,3 +1223,74 @@ BACKTEST_METHODOLOGY_REVIEW.md`, gitignore 처리), 그 권고를 실제 계획
   이름 무관하게 내용은 이 이슈용)
 
 </details>
+
+<details>
+<summary>2026-07-23 - 투자 콘텐츠 요약 피드 모듈 P0~P2 구현(유튜브 채널 수집+필터링)</summary>
+
+**변경 사항**
+- 지정 유튜브 채널(한국경제TV/런던고라니/주덕)의 신규 영상을 수집→
+  필터링하는 파이프라인의 앞단(P0 스키마, P1 수집, P2 필터링)을
+  `com.quantlime.videofeed` 패키지로 구현. P3(자막)/P4(AI 요약)는
+  스키마만 준비해두고 이번 세션 범위 밖으로 남김
+- 신규 도메인: `Channel`/`Video`/`Transcript`/`Summary`/`VideoTicker`
+  (JPA 엔티티, ddl-auto=update로 자동 생성 - 프로젝트에 Flyway/Liquibase가
+  전혀 없어 요청받은 원본 스펙의 Postgres+Flyway 스키마를 그대로 쓰지
+  않고 기존 컨벤션에 맞춰 번역함)
+- 신규 인프라: `infra/youtube/YoutubeApiClient` - playlistItems.list(1u)
+  + videos.list(1u)만 사용(search.list 100u는 금지 규칙 그대로 준수)
+- 수집 오케스트레이션: `YoutubeVideoCollector`(외부 I/O 전용, 트랜잭션
+  없음) → `VideoPersistService`(짧은 트랜잭션, external_video_id 존재
+  확인으로 멱등 upsert) → `VideoFilterService`(제목 제외/포함, 최소
+  길이, 6시간 유예 후 velocity 판정, max_per_run 컷) →
+  `FeedCollectionFacade`(채널별 try/catch로 장애 격리) →
+  `FeedCollectionScheduler`(하루 3회, 07/12/19시)
+- `ChannelVelocityInitializationService` - 채널별 최근 30개 업로드의
+  views/hours 중앙값 산정(관리자 API로 수동 트리거)
+- 관리자 API: `POST /api/admin/feed/collect`,
+  `POST /api/admin/feed/channels/{channelId}/velocity/initialize` -
+  기존 `UserRole.ADMIN`/`ROLE_ADMIN` 인프라가 이미 있어 SecurityConfig에
+  `/api/admin/**` 매처 한 줄만 추가해 게이팅(신규 권한 체계 도입 없음)
+- 채널 시딩: Flyway가 없어 `StockMasterInitializer`/
+  `SubscriptionPlanInitializer`와 동일한 `ApplicationRunner` 패턴으로
+  `ChannelSeedInitializer` 작성(이미 있으면 skip)
+
+**결정 사항**
+- **패키지명을 `feed`가 아니라 `videofeed`로 분리** - 이 프로젝트에는
+  이미 `com.quantlime.feed`(사용자 작성 커뮤니티 글/댓글/좋아요)가
+  존재해서, 요청받은 "투자 콘텐츠 요약 피드"를 그대로 `feed`에 넣으면
+  완전히 다른 두 도메인이 클래스명/패키지에서 충돌함
+- **원본 스펙의 raw SQL PK 네이밍(`id`)과 이 프로젝트의 엔티티 컨벤션
+  (`{entity}_id`)이 충돌** - 원본은 PK를 `id`로, 외부 플랫폼 식별자를
+  `channel_id`/`video_id`로 명명했는데, 이 프로젝트 컨벤션은 PK 컬럼명을
+  `{entity}_id`로 강제한다(Stock의 `stock_id` 등과 동일). PK는 컨벤션대로
+  `channel_id`/`video_id`로, 외부 식별자는 `external_channel_id`/
+  `external_video_id`로 개명해 해결
+- **분산락은 Redisson이 아니라 기존 `spring-data-redis`의 SETNX로 구현**
+  (`RedisLockService`) - 이 프로젝트는 Redisson 의존성이 전혀 없고,
+  이미 쓰고 있는 StringRedisTemplate만으로 같은 목적(여러 인스턴스가
+  동시에 같은 스케줄 작업을 실행하는 것 방지)을 달성할 수 있어 새
+  라이브러리를 추가하지 않음
+- **channel_id 3개는 웹 검색으로 이 세션에서 직접 찾았지만 미검증** -
+  유튜브 도메인 자체가 이 세션의 프록시에서 403으로 막혀 있어 채널
+  페이지/RSS 피드로 직접 재확인하지 못함. `ChannelSeedInitializer`
+  주석에 출처별 신뢰도와 재검증 방법(`channels.list?forHandle=`)을
+  남겨둠 - **운영 투입 전 반드시 재확인 필요**
+- filter_config(JSONB)는 `AttributeConverter`로 `ChannelFilterConfig`
+  레코드에 매핑(MySQL은 JSONB가 아니라 JSON 컬럼 - `BillingKeyConverter`와
+  동일한 컨버터 패턴 재사용). `summary.payload`는 P4 설계가 아직
+  진행 중이라 타입을 고정하지 않고 원문 JSON 문자열 컬럼으로만 남김
+- 최초 수집(lastCollectedAt 없음)은 페이지 4개(최대 200개)로 상한 -
+  한국경제TV처럼 2011년부터 운영된 채널 전체 업로드 이력을 훑으면
+  일일 쿼터를 첫 실행에서 소진할 위험이 있어 의도적으로 캡을 둠
+
+**다음 작업**
+- 채널 3개 channelId를 `channels.list?forHandle=`로 재검증(§4 참고)
+- `YOUTUBE_API_KEY` 발급 후 실제 `POST /api/admin/feed/collect` 실행해
+  `video` 테이블 적재 확인 (요청자 지시사항)
+- P3(FastAPI `/transcribe`, youtube-transcript-api 연동, 청킹 전략) 설계
+- P4(AI 구조화 요약 + 종목 태깅, §6 요약 JSON 스키마) 설계
+- 이 세션은 Docker/Testcontainers 미가용 환경이라 신규 유닛 테스트
+  12개(필터링/멱등 적재/증분 수집 컷오프)만 검증했고, 실제 MySQL
+  기동 통합 테스트·Playwright 프론트 확인은 아직 안 함
+
+</details>

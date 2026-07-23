@@ -80,7 +80,10 @@ quantlime/
 │   │       ├── common/              # TimeBaseEntity, Config, Exception
 │   │       ├── stock/               # 종목 도메인, 서비스, CSV 적재
 │   │       ├── price/               # 시세 도메인, 수집 서비스, 스케줄러
-│   │       └── infra/toss/          # 토스증권 API 클라이언트, 토큰 관리
+│   │       ├── feed/                # 커뮤니티 피드(글/댓글/좋아요) - videofeed와는 다른 도메인
+│   │       ├── videofeed/           # 투자 콘텐츠 요약 피드(유튜브 채널 수집/필터링, Phase 8)
+│   │       ├── infra/toss/          # 토스증권 API 클라이언트, 토큰 관리
+│   │       └── infra/youtube/       # 유튜브 Data API v3 클라이언트(videofeed 전용)
 │   ├── common/                 # 공유 유틸 (java-library, Spring 미포함)
 │   │   └── src/main/java/com/quantlime/common/exception/ErrorCode.java
 │   └── event/                  # Kafka 이벤트 (향후 확장)
@@ -172,6 +175,19 @@ quantlime/
 - **Rate Limit 그룹:** `MARKET_DATA` (현재가/호가), `MARKET_DATA_CHART` (캔들), `STOCK` (종목정보)
 - **WebSocket:** 추후 지원 예정 (현재 미제공)
 
+### 유튜브 Data API v3 (투자 콘텐츠 요약 피드용, 2026-07-23 신규)
+- **Base URL:** `https://www.googleapis.com/youtube/v3`
+- **인증:** API 키(`YOUTUBE_API_KEY`, 쿼리 파라미터로 전달)
+- **사용 엔드포인트:** `playlistItems.list`(1u), `videos.list`(1u) 둘뿐 -
+  **`search.list`(100u)는 절대 쓰지 않는다**(일 쿼터 10,000u를 순식간에
+  소모). 채널의 "업로드" 재생목록(`UU` + channelId[2:])을 `playlistItems`로
+  훑고, 영상 길이/조회수가 필요할 때만 `videos.list`로 최대 50개씩
+  배치 조회
+- **채널ID 확보:** 나무위키/vidiq/noxinfluencer 등 웹 검색으로 찾은
+  후보는 `channels.list?part=id&forHandle=@핸들`로 재검증 필수(2026-07-23
+  세션은 유튜브 도메인 자체가 프록시에서 403이라 직접 재검증 못 함 -
+  `ChannelSeedInitializer` 주석 참고)
+
 ---
 
 ## 5. 환경변수
@@ -259,6 +275,19 @@ quantlime/
 | POST | `/api/subscription/cancel` | 자동갱신 해제(현재 주기 종료까지는 계속 이용 가능) |
 | GET | `/api/subscription/payments` | 결제 이력 조회 |
 | POST | `/api/webhooks/tosspayments` | 토스페이먼츠 웹훅(서명 검증, 인증 불필요) |
+
+### 투자 콘텐츠 요약 피드 - 관리자 (2026-07-23 신규, P0~P2만 구현)
+
+> 유튜브 채널(한국경제TV/런던고라니/주덕) 신규 영상 수집→필터링.
+> `com.quantlime.videofeed` 패키지 - 커뮤니티 글/댓글인 `com.quantlime.feed`와는
+> 다른 도메인이니 혼동 주의. 정규 실행은 `FeedCollectionScheduler`(하루
+> 3회, 07/12/19시)이고 아래는 그 사이 수동 트리거용. `ROLE_ADMIN` 필요.
+> 자막(P3)·AI 요약(P4)은 아직 미구현(엔티티 스키마만 준비됨).
+
+| Method | URI | 설명 |
+|---|---|---|
+| POST | `/api/admin/feed/collect` | 전체 채널 영상 수집 수동 트리거(수집→적재→필터링) |
+| POST | `/api/admin/feed/channels/{channelId}/velocity/initialize` | 채널 중앙값 업로드 속도(views/hours) 초기 산정 |
 
 ---
 
@@ -534,6 +563,39 @@ catch-all(`@ExceptionHandler(Exception.class)`)이 Spring 6의
 - [ ] 분봉(1분봉) 차트 (하~중, 토스 API는 이미 지원 - 페이지네이션·저장
   설계가 남아 2026-07-14 세션에서 TODO로 보류. 상세는
   `docs/ROADMAP.md` §8 참고)
+
+### 🔵 Phase 8 — 투자 콘텐츠 요약 피드 (진행 중, P0~P2 구현 완료)
+
+지정 유튜브 채널의 신규 영상을 수집→필터링→(향후)자막→AI 요약→종목
+태깅해 피드로 노출하는 모듈. `com.quantlime.videofeed` 패키지(커뮤니티
+피드인 `com.quantlime.feed`와는 다른 도메인 - 패키지명 충돌을 피하려고
+분리함). 상세 결정 사항은 `docs/CHANGELOG.md` 2026-07-23 항목 참고.
+
+- [x] P0 스키마 + 채널 시드 - Flyway/Liquibase가 이 프로젝트에 전혀
+  없어(ddl-auto=update만 사용) 원본 스펙의 Postgres+Flyway SQL을 그대로
+  쓰지 않고 JPA 엔티티(`Channel`/`Video`/`Transcript`/`Summary`/
+  `VideoTicker`)로 번역. 채널 3개는 `ChannelSeedInitializer`
+  (`ApplicationRunner`, 기존 `StockMasterInitializer`와 동일 패턴)로 시딩
+- [x] P1 영상 수집 - `infra/youtube/YoutubeApiClient`(playlistItems.list/
+  videos.list만 사용, search.list 금지) + `YoutubeVideoCollector`(I/O
+  전용) + `VideoPersistService`(external_video_id 존재 확인으로 멱등
+  upsert, 짧은 트랜잭션)
+- [x] P2 필터링 - `VideoFilterService`(제목 제외/포함, 최소 길이,
+  업로드 6시간 유예 후 velocity 판정, max_per_run 컷),
+  `ChannelVelocityInitializationService`(채널별 최근 30개 중앙값)
+- [x] 관리자 수동 트리거 API 2종 + `FeedCollectionScheduler`(하루 3회,
+  Redisson 대신 기존 `spring-data-redis` SETNX 기반 `RedisLockService`로
+  분산락 - 새 라이브러리 추가 없이 동일 목적 달성)
+- [ ] **채널ID 3개 재검증 필요** - 웹 검색으로 찾았지만 유튜브 도메인이
+  이 세션 프록시에서 403이라 직접 재검증 못 함(`ChannelSeedInitializer`
+  주석 참고). `channels.list?forHandle=`로 확인 전 운영 투입 금지
+- [ ] `YOUTUBE_API_KEY` 발급 후 `POST /api/admin/feed/collect` 실행해
+  `video` 테이블 적재 실증(아직 미검증 - Docker/Testcontainers 없는
+  세션이라 유닛 테스트만 통과 확인함)
+- [ ] P3 자막 수집 (FastAPI `/transcribe`, youtube-transcript-api, 청킹 전략)
+- [ ] P4 AI 구조화 요약 + 종목 태깅(§6 요약 JSON 스키마, `caveat` 필수)
+- [ ] P6 프론트 피드 노출
+- [ ] P7 텔레그램 확장(`platform='TELEGRAM'`)
 
 ---
 
