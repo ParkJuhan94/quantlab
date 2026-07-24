@@ -786,6 +786,14 @@ com.quantlime/{feature}/
   text-white hover:bg-gray-800`, Secondary는 `border border-gray-200
   text-gray-700 hover:bg-gray-50`, 텍스트 링크는 `text-gray-700
   hover:underline`로 통일한다.
+- **모서리 둥근 정도(border-radius)는 홈 실시간 랭킹의 전체/국내/해외
+  필터 박스를 기준으로 통일한다 - 바깥 래퍼(`bg-gray-100 p-1`)는
+  `rounded-xl`, 그 안의 개별 버튼은 `rounded-lg`.** 2026-07-23 세션에서
+  버튼·박스류 전반에 `rounded-md`(등급 배지, 헤더 네비, 캔들 봉/주/월
+  선택기 등)와 `rounded-full` 알약형(헤더 검색창, 로그인 CTA)이 뒤섞여
+  있던 걸 이 기준 하나로 통일 - 화면마다 모서리가 미묘하게 달라 보이던
+  문제를 없앴다. 아바타·토글 스위치 손잡이·펄스 점처럼 "네모난 박스"가
+  아니라 원래부터 원형이어야 하는 요소는 예외(`rounded-full` 유지).
 - **"선택됨"은 글자색이 아니라 배경색으로 표시한다.** 사이드패널 탭,
   피드 주제별 커뮤니티 목록, 관심 그룹 목록 등 "지금 뭐가 선택돼 있는지"
   보여줘야 하는 곳은 `bg-gray-100 text-gray-900`(선택) vs
