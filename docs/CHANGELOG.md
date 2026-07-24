@@ -1223,3 +1223,56 @@ BACKTEST_METHODOLOGY_REVIEW.md`, gitignore 처리), 그 권고를 실제 계획
   이름 무관하게 내용은 이 이슈용)
 
 </details>
+
+<details>
+<summary>2026-07-24 - 토스 토큰 발급 무한 실패 원인 규명 + fail-fast 개선</summary>
+
+**변경 사항**
+- 기동 직후 토스 토큰 발급이 무한 실패하던 문제의 진짜 원인을 규명했다.
+  로그엔 429와 "깨진 바이너리 400"이 섞여 찍혔는데, 오진 3번을 거쳐(아래
+  결정 사항 참고) 최종 원인은 **앱이 빈 자격증명을 보내고 있던 것**이었다.
+  깨진 400 바디의 정체는 gzip 압축된 `{"error":"invalid_client"}`였고(앱
+  RestClient가 압축을 안 풀어 raw 바이트를 문자열로 로깅), 응답의 `ak_bmsc`
+  쿠키는 Akamai가 늘 붙이는 것일 뿐 차단과 무관했다. 빈 creds의 근본 원인은
+  IntelliJ가 리포 루트를 프로젝트로 열고 Run Configuration에 working directory가
+  없어 기본값(리포 루트)에서 실행 → spring-dotenv가 `backend/.env`를 못 찾아
+  `${TOSS_CLIENT_ID:}`가 빈 문자열로 폴백. 코드 버그가 아니라 실행 환경 문제.
+- `TossApiConfig`를 fail-fast로 개선: 크리덴셜이 비면 WARN 한 줄만 남기고
+  넘어가던 걸 `IllegalStateException`으로 기동 자체를 중단하게 바꿔, 이
+  실패 모드를 startup 시점에 즉시 드러나게 했다. `ApiTestSupport`(전체
+  컨텍스트 로드)가 이 검증에 걸리므로 `application-test.yml`에 테스트 전용
+  더미 크리덴셜을 고정(기존 jwt.secret 선례와 동일 패턴).
+- 삽질 과정에서 발견한 실제 결함 2건도 함께 수정(근본 원인과 별개지만 유효):
+  - `AllListedStockCache`가 시장 구분 없이 상장종목을 전부 조회해 KIS 해외
+    종목(NASDAQ/NYSE)까지 토스(국내 전용) 현재가 API에 넘기던 것을
+    `MarketType.domesticValues()` 필터로 국내만 조회하게 수정.
+  - `MarketCalendarCache`/`TossTokenManager`가 외부 호출 실패 시 재시도
+    간격을 강제하지 않아 스케줄러 틱(100ms)마다 재호출하던 것을 각각 3초/30초
+    백오프로 완화(토큰 엔드포인트는 한도가 더 빡빡해 더 길게).
+
+**변경 파일**
+- `backend/core/.../infra/toss/TossApiConfig.java` - 크리덴셜 미설정 시 fail-fast
+- `backend/api/src/test/resources/application-test.yml` - 테스트 더미 토스 크리덴셜
+- `backend/core/.../infra/toss/TossTokenManager.java` - 발급 실패 시 30초 백오프
+- `backend/core/.../price/cache/MarketCalendarCache.java` - 조회 실패 시 3초 백오프
+- `backend/core/.../market/cache/AllListedStockCache.java` - 국내 종목만 조회
+- `backend/core/.../stock/repository/StockRepository.java` - 시장구분 필터 쿼리 추가
+- 위 4개 대응 테스트
+
+**결정 사항**
+- 조용한 WARN보다 fail-fast: 크리덴셜 같은 필수 전제조건이 비면 "일단 기동은
+  되는" 관대함이 오히려 원인 파악을 이틀 지연시켰다(빈 creds로 토스를 무한히
+  두드리면서도 startup은 멀쩡해 보임). 되돌리기 어렵거나 필수인 전제는
+  startup에서 터뜨리는 게 운영·디버깅 모두에 낫다고 판단.
+- 오진 3번을 기록으로 남김: (1) 해외종목 누수로 인한 429, (2) 캘린더 캐시
+  폭주, (3) Akamai 봇 차단/토큰 1개 계정 왕복 — 특히 (3)은 "EC2 꺼도 로컬
+  실패, 같은 자격증명으로 curl은 200"이라는 비대칭 사실로 기각됐다. 결정적
+  단서는 "curl은 되는데 앱은 안 된다 = 요청 내용 자체가 다르다"였음.
+- 삽질 부산물(백오프 2개, 해외종목 필터)은 근본 원인과 무관하지만 실재하는
+  결함을 고친 것이라 그대로 유효한 개선으로 남겼다.
+
+**다음 작업**
+- 없음(원인 해결은 IDE Run Configuration의 working directory를 `backend`로
+  지정하는 것 — 코드 변경 아님. fail-fast로 재발 시 즉시 드러나게 함).
+
+</details>
