@@ -597,6 +597,49 @@ catch-all(`@ExceptionHandler(Exception.class)`)이 Spring 6의
 - [ ] P6 프론트 피드 노출
 - [ ] P7 텔레그램 확장(`platform='TELEGRAM'`)
 
+#### 📋 다음 세션(로컬) 실행 가이드
+
+원격 세션은 유튜브 도메인이 프록시에서 막혀 있고 Docker도 없어 실제
+API 호출/DB 적재를 검증하지 못했다. 로컬 환경에서 아래 순서로 이어서
+진행할 것.
+
+1. **YouTube Data API 키 발급**: Google Cloud Console → 프로젝트
+   생성/선택 → "YouTube Data API v3" 활성화 → 사용자 인증 정보에서
+   API 키 발급
+2. `backend/.env`에 `YOUTUBE_API_KEY=발급받은키` 추가(`.gitignore`
+   대상이라 커밋 안 됨)
+3. **채널ID 3개 재검증(운영 투입 전 필수)** - 브라우저나 curl로
+   `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=@핸들&key=API_KEY`
+   호출해 `ChannelSeedInitializer`에 심어둔 값과 일치하는지 확인
+   (@hkwowtv, 런던고라니 핸들, 주덕 핸들 각각). 다르면 그 파일의 값을
+   고치고 이미 DB에 잘못 시딩됐다면 `channel` 테이블에서 해당 행도
+   같이 수정
+4. 로컬 인프라+백엔드 기동: `docker-compose up -d` →
+   `cd backend && ./gradlew :api:bootRun`
+5. **ROLE_ADMIN 토큰 확보** - 이 프로젝트엔 아직 "관리자로 승격"하는
+   API가 없다(`User.role`은 가입 시 `USER`로 고정, 변경 메서드 없음).
+   로컬에서만 아래처럼 우회할 것(운영에서는 절대 이렇게 하지 말 것):
+   1. `POST /dev/auth/token` 한 번 호출해 `dev-test-user` 계정을 생성
+   2. `UPDATE users SET role='ADMIN' WHERE provider_id='dev-test-user';`로
+      DB에서 직접 role 변경(JWT는 발급 시점 role을 그대로 굽기 때문에
+      DB만 바꿔서는 기존 토큰에 반영 안 됨)
+   3. `POST /dev/auth/token`을 다시 호출해 ADMIN role이 반영된 새
+      액세스 토큰 발급받기(`findOrCreate`가 매번 DB를 다시 조회하므로
+      바뀐 role이 그대로 실림)
+6. **median_velocity 먼저 채우기** - 채널 3개 각각에 대해
+   `POST /api/admin/feed/channels/{channelId}/velocity/initialize`
+   호출(`Authorization: Bearer <5번 토큰>`). 안 하고 바로 6번을 돌리면
+   velocity 배수가 0이 아닌 한국경제TV는 `VideoFilterService`가
+   "median_velocity 미산정"으로 판단해 검사 없이 그냥 통과시킨다(코드
+   주석 참고) - 실제 필터링 동작을 제대로 보려면 먼저 산정해둘 것
+7. `POST /api/admin/feed/collect` 호출 → 응답(`CollectResult` 배열)의
+   채널별 `discoveredCount`/`success` 확인 → DB에서
+   `SELECT * FROM video ORDER BY created_at DESC LIMIT 20;`로 실제
+   적재와 `status`(DISCOVERED/FILTERED_OUT/PENDING_REVIEW/SELECTED)
+   분포 확인
+8. 여기까지 확인되면 이 체크리스트의 "YOUTUBE_API_KEY 발급 후 ... 실증"
+   항목을 완료로 바꾸고, P3(자막 수집) 설계로 넘어갈 것
+
 ---
 
 ## 9. 코드 컨벤션
